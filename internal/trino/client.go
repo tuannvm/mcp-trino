@@ -7,6 +7,7 @@ import (
 	"log"
 	"time"
 
+	_ "github.com/trinodb/trino-go-client/trino"
 	"github.com/tuannvm/mcp-trino/internal/config"
 )
 
@@ -19,7 +20,7 @@ type Client struct {
 
 // NewClient creates a new Trino client
 func NewClient(cfg *config.TrinoConfig) (*Client, error) {
-	dsn := fmt.Sprintf("http://%s:%s@%s:%d?catalog=%s&schema=%s",
+	dsn := fmt.Sprintf("https://%s:%s@%s:%d?catalog=%s&schema=%s&SSL=true&SSLInsecure=true",
 		cfg.User,
 		cfg.Password,
 		cfg.Host,
