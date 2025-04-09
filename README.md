@@ -95,6 +95,39 @@ The server can be configured using the following environment variables:
 | MCP_TRANSPORT  | Transport method (stdio/http) | stdio     |
 | MCP_PORT       | HTTP port for http transport  | 9097      |
 
+### Using `mcp.json`
+
+You can integrate this MCP server with Cursor IDE by configuring the `mcp.json` file in your Cursor IDE settings directory (typically `~/.cursor/`).
+
+Example `mcp.json` for Cursor IDE:
+
+```json
+{
+	"mcpServers": {
+		"mcp-liftoff-trino-adhoc": {
+			"command": "mcp-trino",
+			"args": [],
+			"env": {
+				"TRINO_HOST": "<HOST>",
+				"TRINO_PORT": "<PORT>",
+				"TRINO_USER": "<USER>",
+				"TRINO_PASSWORD": "<PASSWORD>",
+			}
+		}
+	}
+}
+```
+
+Replace the placeholders:
+- `<HOST>`: Your Trino server hostname
+- `<PORT>`: Your Trino server port
+- `<USER>`: Your Trino username
+- `<PASSWORD>`: Your Trino password
+
+After configuring this file, Cursor's AI assistant will be able to directly query your Trino database using natural language.
+
+**Note:** When using the MCP server standalone, environment variables will override the settings specified in the `mcp.json` file if both are present.
+
 ## Development
 
 1. Setup Go environment
