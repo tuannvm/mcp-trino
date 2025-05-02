@@ -91,9 +91,17 @@ func main() {
 			server.WithUseFullURLForMessageEndpoint(true), // Use full URLs for message endpoints
 		)
 		log.Printf("SSE server created with endpoint: %s", sseServer.CompleteSsePath())
-		log.Printf("Full SSE endpoint URL: %s", sseServer.CompleteSseEndpoint())
+		if endpoint, err := sseServer.CompleteSseEndpoint(); err != nil {
+			log.Printf("Error getting SSE endpoint URL: %v", err)
+		} else {
+			log.Printf("Full SSE endpoint URL: %s", endpoint)
+		}
 		log.Printf("Message endpoint: %s", sseServer.CompleteMessagePath())
-		log.Printf("Full Message endpoint URL: %s", sseServer.CompleteMessageEndpoint())
+		if endpoint, err := sseServer.CompleteMessageEndpoint(); err != nil {
+			log.Printf("Error getting message endpoint URL: %v", err)
+		} else {
+			log.Printf("Full Message endpoint URL: %s", endpoint)
+		}
 
 		// Create an HTTP server
 		log.Printf("Starting HTTP server on %s", addr)
