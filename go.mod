@@ -3,7 +3,7 @@ module github.com/tuannvm/mcp-trino
 go 1.24.6
 
 require (
-	github.com/coreos/go-oidc/v3 v3.14.1
+	github.com/coreos/go-oidc/v3 v3.15.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/mark3labs/mcp-go v0.34.0
 	github.com/trinodb/trino-go-client v0.326.0
