@@ -42,7 +42,7 @@ graph TB
         HTTP[HTTP Transport<br/>/mcp endpoint]
         STDIO[STDIO Transport]
         AUTH[OAuth Middleware]
-        TOOLS[MCP Tools<br/>• execute_query<br/>• list_catalogs<br/>• list_schemas<br/>• list_tables<br/>• get_table_schema<br/>• explain_query<br/>• show_table_stats]
+        TOOLS[MCP Tools<br/>• execute_query<br/>• list_catalogs<br/>• list_schemas<br/>• list_tables<br/>• get_table_schema<br/>• explain_query]
     end
     
     subgraph "Data Layer"
@@ -594,7 +594,7 @@ Analyze Trino query execution plans without running expensive queries, showing d
 ```json
 {
   "query": "SELECT region, COUNT(*) as customer_count FROM tpch.tiny.customer GROUP BY region ORDER BY customer_count DESC",
-  "format": "DISTRIBUTED"
+  "format": "LOGICAL"
 }
 ```
 
@@ -618,57 +618,6 @@ Analyze Trino query execution plans without running expensive queries, showing d
       ],
       "estimated_rows": 25,
       "estimated_cost": "cpu: 0.25, memory: 0.00, network: 0.05"
-    }
-  ]
-}
-```
-
-### show_table_stats
-
-Retrieve Trino table statistics including row counts, column cardinality, and data distributions for query optimization.
-
-**Sample Prompt:**
-> "What are the statistics for the customer table? I need to understand the data distribution for query optimization."
-
-**Example:**
-```json
-{
-  "catalog": "tpch",
-  "schema": "tiny",
-  "table": "customer"
-}
-```
-
-**Response:**
-```json
-{
-  "statistics": [
-    {
-      "column_name": "custkey",
-      "data_size": null,
-      "distinct_values_count": 25.0,
-      "nulls_fraction": 0.0,
-      "row_count": 25.0,
-      "low_value": "1",
-      "high_value": "25"
-    },
-    {
-      "column_name": "nationkey",
-      "data_size": null,
-      "distinct_values_count": 25.0,
-      "nulls_fraction": 0.0,
-      "row_count": 25.0,
-      "low_value": "0",
-      "high_value": "24"
-    },
-    {
-      "column_name": "acctbal",
-      "data_size": null,
-      "distinct_values_count": 25.0,
-      "nulls_fraction": 0.0,
-      "row_count": 25.0,
-      "low_value": "-272.6",
-      "high_value": "9904.28"
     }
   ]
 }
