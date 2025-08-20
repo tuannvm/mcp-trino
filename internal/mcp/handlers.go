@@ -235,52 +235,6 @@ func (h *TrinoHandlers) ExplainQuery(ctx context.Context, request mcp.CallToolRe
 	return mcp.NewToolResultText(string(jsonData)), nil
 }
 
-// ShowTableStats handles table statistics retrieval
-func (h *TrinoHandlers) ShowTableStats(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-
-	// Type assert Arguments to map[string]interface{}
-	args, ok := request.Params.Arguments.(map[string]interface{})
-	if !ok {
-		mcpErr := fmt.Errorf("invalid arguments format")
-		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil
-	}
-
-	// Extract parameters
-	var catalog, schema string
-	var table string
-
-	if catalogParam, ok := args["catalog"].(string); ok {
-		catalog = catalogParam
-	}
-	if schemaParam, ok := args["schema"].(string); ok {
-		schema = schemaParam
-	}
-
-	// Table parameter is required
-	tableParam, ok := args["table"].(string)
-	if !ok {
-		mcpErr := fmt.Errorf("table parameter is required")
-		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil
-	}
-	table = tableParam
-
-	stats, err := h.TrinoClient.ShowTableStats(catalog, schema, table)
-	if err != nil {
-		log.Printf("Error getting table stats: %v", err)
-		mcpErr := fmt.Errorf("failed to get table statistics: %w", err)
-		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil
-	}
-
-	// Convert stats to JSON string for display
-	jsonData, err := json.MarshalIndent(stats, "", "  ")
-	if err != nil {
-		mcpErr := fmt.Errorf("failed to marshal table statistics to JSON: %w", err)
-		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil
-	}
-
-	return mcp.NewToolResultText(string(jsonData)), nil
-}
-
 // RegisterTrinoTools registers all Trino-related tools with the MCP server
 func RegisterTrinoTools(m *server.MCPServer, h *TrinoHandlers) {
 	// Get OAuth middleware if available
@@ -328,11 +282,4 @@ func RegisterTrinoTools(m *server.MCPServer, h *TrinoHandlers) {
 		mcp.WithString("query", mcp.Required(), mcp.Description("SQL query to analyze (SELECT, JOIN, aggregations, etc.)")),
 		mcp.WithString("format", mcp.Description("Plan type: LOGICAL, DISTRIBUTED, VALIDATE, or IO (optional)"))),
 		applyMiddleware(h.ExplainQuery))
-
-	m.AddTool(mcp.NewTool("show_table_stats",
-		mcp.WithDescription("Retrieve Trino table statistics including row counts, column cardinality, data sizes, and value distributions. Helps with query planning, join optimization, and understanding data characteristics."),
-		mcp.WithString("catalog", mcp.Description("Trino catalog containing the table (optional)")),
-		mcp.WithString("schema", mcp.Description("Schema containing the table (optional)")),
-		mcp.WithString("table", mcp.Required(), mcp.Description("Table name to get statistics for"))),
-		applyMiddleware(h.ShowTableStats))
 }

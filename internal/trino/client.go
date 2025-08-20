@@ -73,11 +73,11 @@ func (c *Client) Close() error {
 func isReadOnlyQuery(query string) bool {
 	// Convert to lowercase for case-insensitive comparison and normalize whitespace
 	queryLower := strings.ToLower(strings.TrimSpace(query))
-	
+
 	// Replace any newline characters with spaces to normalize the query format
 	queryLower = strings.ReplaceAll(queryLower, "\n", " ")
 	queryLower = strings.ReplaceAll(queryLower, "\r", " ")
-	
+
 	// Ensure there's at least one space after keywords for proper prefix matching
 	if strings.HasPrefix(queryLower, "select") && !strings.HasPrefix(queryLower, "select ") {
 		queryLower = "select " + queryLower[6:]
@@ -104,7 +104,7 @@ func isReadOnlyQuery(query string) bool {
 	writeOperations := []string{
 		"insert ", "update ", "delete ", "drop ", "create ", "alter ", "truncate ",
 	}
-	
+
 	for _, op := range writeOperations {
 		if strings.Contains(queryLower, op) {
 			return false
@@ -300,28 +300,4 @@ func (c *Client) ExplainQuery(query string, format string) ([]map[string]interfa
 	explainQuery = fmt.Sprintf("%s %s", explainQuery, query)
 
 	return c.ExecuteQuery(explainQuery)
-}
-
-// ShowTableStats returns statistics for a table using SHOW STATS
-func (c *Client) ShowTableStats(catalog, schema, table string) ([]map[string]interface{}, error) {
-	// Build fully qualified table name
-	if catalog == "" {
-		catalog = c.config.Catalog
-	}
-	if schema == "" {
-		schema = c.config.Schema
-	}
-
-	// Check if table already contains a fully qualified name
-	parts := strings.Split(table, ".")
-	var statsQuery string
-	if len(parts) == 3 {
-		statsQuery = fmt.Sprintf("SHOW STATS FOR %s", table)
-	} else if len(parts) == 2 {
-		statsQuery = fmt.Sprintf("SHOW STATS FOR %s.%s", catalog, table)
-	} else {
-		statsQuery = fmt.Sprintf("SHOW STATS FOR %s.%s.%s", catalog, schema, table)
-	}
-
-	return c.ExecuteQuery(statsQuery)
 }
