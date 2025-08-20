@@ -306,8 +306,8 @@ func RegisterTrinoTools(m *server.MCPServer, h *TrinoHandlers) {
 		applyMiddleware(h.ListCatalogs))
 
 	m.AddTool(mcp.NewTool("list_schemas",
-		mcp.WithDescription("Browse schemas (databases/namespaces) within Trino catalogs. Each schema contains related tables and views. Use this to navigate the data hierarchy before querying specific datasets."),
-		mcp.WithString("catalog", mcp.Description("Trino catalog name (optional - lists schemas from all catalogs if omitted)"))),
+		mcp.WithDescription("Browse schemas (databases/namespaces) within a Trino catalog. Each schema contains related tables and views. Use this to navigate the data hierarchy before querying specific datasets."),
+		mcp.WithString("catalog", mcp.Description("Trino catalog name (optional; defaults to server configuration if omitted)"))),
 		applyMiddleware(h.ListSchemas))
 
 	m.AddTool(mcp.NewTool("list_tables",
@@ -326,7 +326,7 @@ func RegisterTrinoTools(m *server.MCPServer, h *TrinoHandlers) {
 	m.AddTool(mcp.NewTool("explain_query",
 		mcp.WithDescription("Analyze Trino query execution plans without running expensive queries. Shows distributed execution stages, data movement between nodes, and resource estimates. Essential for query optimization and performance tuning."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("SQL query to analyze (SELECT, JOIN, aggregations, etc.)")),
-		mcp.WithString("format", mcp.Description("Plan type: DISTRIBUTED (default), VALIDATE, or IO"))),
+		mcp.WithString("format", mcp.Description("Plan type: LOGICAL, DISTRIBUTED, VALIDATE, or IO (optional)"))),
 		applyMiddleware(h.ExplainQuery))
 
 	m.AddTool(mcp.NewTool("show_table_stats",

@@ -287,10 +287,15 @@ func (c *Client) GetTableSchema(catalog, schema, table string) ([]map[string]int
 
 // ExplainQuery returns the query execution plan for a given SQL query
 func (c *Client) ExplainQuery(query string, format string) ([]map[string]interface{}, error) {
-	// Build EXPLAIN query with optional format
+	// Build EXPLAIN query with optional TYPE format (LOGICAL|DISTRIBUTED|VALIDATE|IO)
 	explainQuery := "EXPLAIN"
-	if format != "" && (format == "DISTRIBUTED" || format == "VALIDATE" || format == "IO") {
-		explainQuery = fmt.Sprintf("EXPLAIN (%s)", format)
+	if f := strings.ToUpper(strings.TrimSpace(format)); f != "" {
+		switch f {
+		case "LOGICAL", "DISTRIBUTED", "VALIDATE", "IO":
+			explainQuery = fmt.Sprintf("EXPLAIN (TYPE %s)", f)
+		default:
+			return nil, fmt.Errorf("invalid EXPLAIN format: %q (allowed: LOGICAL, DISTRIBUTED, VALIDATE, IO)", format)
+		}
 	}
 	explainQuery = fmt.Sprintf("%s %s", explainQuery, query)
 
