@@ -284,3 +284,39 @@ func (c *Client) GetTableSchema(catalog, schema, table string) ([]map[string]int
 	query := fmt.Sprintf("DESCRIBE %s.%s.%s", catalog, schema, table)
 	return c.ExecuteQuery(query)
 }
+
+// ExplainQuery returns the query execution plan for a given SQL query
+func (c *Client) ExplainQuery(query string, format string) ([]map[string]interface{}, error) {
+	// Build EXPLAIN query with optional format
+	explainQuery := "EXPLAIN"
+	if format != "" && (format == "DISTRIBUTED" || format == "VALIDATE" || format == "IO") {
+		explainQuery = fmt.Sprintf("EXPLAIN (%s)", format)
+	}
+	explainQuery = fmt.Sprintf("%s %s", explainQuery, query)
+
+	return c.ExecuteQuery(explainQuery)
+}
+
+// ShowTableStats returns statistics for a table using SHOW STATS
+func (c *Client) ShowTableStats(catalog, schema, table string) ([]map[string]interface{}, error) {
+	// Build fully qualified table name
+	if catalog == "" {
+		catalog = c.config.Catalog
+	}
+	if schema == "" {
+		schema = c.config.Schema
+	}
+
+	// Check if table already contains a fully qualified name
+	parts := strings.Split(table, ".")
+	var statsQuery string
+	if len(parts) == 3 {
+		statsQuery = fmt.Sprintf("SHOW STATS FOR %s", table)
+	} else if len(parts) == 2 {
+		statsQuery = fmt.Sprintf("SHOW STATS FOR %s.%s", catalog, table)
+	} else {
+		statsQuery = fmt.Sprintf("SHOW STATS FOR %s.%s.%s", catalog, schema, table)
+	}
+
+	return c.ExecuteQuery(statsQuery)
+}

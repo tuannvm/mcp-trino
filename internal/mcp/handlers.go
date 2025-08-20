@@ -194,6 +194,93 @@ func (h *TrinoHandlers) GetTableSchema(ctx context.Context, request mcp.CallTool
 	return mcp.NewToolResultText(string(jsonData)), nil
 }
 
+// ExplainQuery handles query plan analysis
+func (h *TrinoHandlers) ExplainQuery(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+
+	// Type assert Arguments to map[string]interface{}
+	args, ok := request.Params.Arguments.(map[string]interface{})
+	if !ok {
+		mcpErr := fmt.Errorf("invalid arguments format")
+		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil
+	}
+
+	// Extract the query parameter
+	query, ok := args["query"].(string)
+	if !ok {
+		mcpErr := fmt.Errorf("query parameter must be a string")
+		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil
+	}
+
+	// Extract optional format parameter
+	var format string
+	if formatParam, ok := args["format"].(string); ok {
+		format = formatParam
+	}
+
+	// Execute the explain query
+	results, err := h.TrinoClient.ExplainQuery(query, format)
+	if err != nil {
+		log.Printf("Error explaining query: %v", err)
+		mcpErr := fmt.Errorf("query explanation failed: %w", err)
+		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil
+	}
+
+	// Convert results to JSON string for display
+	jsonData, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		mcpErr := fmt.Errorf("failed to marshal explanation results to JSON: %w", err)
+		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil
+	}
+
+	return mcp.NewToolResultText(string(jsonData)), nil
+}
+
+// ShowTableStats handles table statistics retrieval
+func (h *TrinoHandlers) ShowTableStats(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+
+	// Type assert Arguments to map[string]interface{}
+	args, ok := request.Params.Arguments.(map[string]interface{})
+	if !ok {
+		mcpErr := fmt.Errorf("invalid arguments format")
+		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil
+	}
+
+	// Extract parameters
+	var catalog, schema string
+	var table string
+
+	if catalogParam, ok := args["catalog"].(string); ok {
+		catalog = catalogParam
+	}
+	if schemaParam, ok := args["schema"].(string); ok {
+		schema = schemaParam
+	}
+
+	// Table parameter is required
+	tableParam, ok := args["table"].(string)
+	if !ok {
+		mcpErr := fmt.Errorf("table parameter is required")
+		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil
+	}
+	table = tableParam
+
+	stats, err := h.TrinoClient.ShowTableStats(catalog, schema, table)
+	if err != nil {
+		log.Printf("Error getting table stats: %v", err)
+		mcpErr := fmt.Errorf("failed to get table statistics: %w", err)
+		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil
+	}
+
+	// Convert stats to JSON string for display
+	jsonData, err := json.MarshalIndent(stats, "", "  ")
+	if err != nil {
+		mcpErr := fmt.Errorf("failed to marshal table statistics to JSON: %w", err)
+		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil
+	}
+
+	return mcp.NewToolResultText(string(jsonData)), nil
+}
+
 // RegisterTrinoTools registers all Trino-related tools with the MCP server
 func RegisterTrinoTools(m *server.MCPServer, h *TrinoHandlers) {
 	// Get OAuth middleware if available
@@ -211,28 +298,41 @@ func RegisterTrinoTools(m *server.MCPServer, h *TrinoHandlers) {
 	}
 
 	m.AddTool(mcp.NewTool("execute_query",
-		mcp.WithDescription("Execute a SQL query"),
-		mcp.WithString("query", mcp.Required(), mcp.Description("SQL query")),
+		mcp.WithDescription("Execute SQL queries on Trino's fast distributed query engine for big data analytics. Run SELECT, SHOW, DESCRIBE, EXPLAIN statements across multiple data sources simultaneously. Perfect for complex analytics, aggregations, joins, and cross-system data exploration on large datasets."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("SQL query to execute on Trino cluster (SELECT, SHOW, DESCRIBE, EXPLAIN supported)")),
 	), applyMiddleware(h.ExecuteQuery))
 
-	m.AddTool(mcp.NewTool("list_catalogs", mcp.WithDescription("List catalogs")),
+	m.AddTool(mcp.NewTool("list_catalogs", mcp.WithDescription("Discover available Trino catalogs - each catalog represents a connector to different data systems (PostgreSQL, MySQL, S3, HDFS, Kafka, etc.). Catalogs are your entry point to querying data across heterogeneous systems in a single SQL query.")),
 		applyMiddleware(h.ListCatalogs))
 
 	m.AddTool(mcp.NewTool("list_schemas",
-		mcp.WithDescription("List schemas"),
-		mcp.WithString("catalog", mcp.Description("Catalog"))),
+		mcp.WithDescription("Browse schemas (databases/namespaces) within Trino catalogs. Each schema contains related tables and views. Use this to navigate the data hierarchy before querying specific datasets."),
+		mcp.WithString("catalog", mcp.Description("Trino catalog name (optional - lists schemas from all catalogs if omitted)"))),
 		applyMiddleware(h.ListSchemas))
 
 	m.AddTool(mcp.NewTool("list_tables",
-		mcp.WithDescription("List tables"),
-		mcp.WithString("catalog", mcp.Description("Catalog")),
-		mcp.WithString("schema", mcp.Description("Schema"))),
+		mcp.WithDescription("Discover tables and views available for querying in Trino schemas. Essential for finding datasets to analyze. Can scope to specific catalog/schema or browse all available data across the distributed system."),
+		mcp.WithString("catalog", mcp.Description("Trino catalog name (optional)")),
+		mcp.WithString("schema", mcp.Description("Schema name within catalog (optional)"))),
 		applyMiddleware(h.ListTables))
 
 	m.AddTool(mcp.NewTool("get_table_schema",
-		mcp.WithDescription("Get table schema"),
-		mcp.WithString("catalog", mcp.Description("Catalog")),
-		mcp.WithString("schema", mcp.Description("Schema")),
-		mcp.WithString("table", mcp.Required(), mcp.Description("Table"))),
+		mcp.WithDescription("Inspect table structure and column metadata from Trino's distributed data sources. Shows column names, data types, nullability, and constraints. Critical for understanding data before writing analytical queries."),
+		mcp.WithString("catalog", mcp.Description("Trino catalog containing the table (optional)")),
+		mcp.WithString("schema", mcp.Description("Schema containing the table (optional)")),
+		mcp.WithString("table", mcp.Required(), mcp.Description("Table name to inspect"))),
 		applyMiddleware(h.GetTableSchema))
+
+	m.AddTool(mcp.NewTool("explain_query",
+		mcp.WithDescription("Analyze Trino query execution plans without running expensive queries. Shows distributed execution stages, data movement between nodes, and resource estimates. Essential for query optimization and performance tuning."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("SQL query to analyze (SELECT, JOIN, aggregations, etc.)")),
+		mcp.WithString("format", mcp.Description("Plan type: DISTRIBUTED (default), VALIDATE, or IO"))),
+		applyMiddleware(h.ExplainQuery))
+
+	m.AddTool(mcp.NewTool("show_table_stats",
+		mcp.WithDescription("Retrieve Trino table statistics including row counts, column cardinality, data sizes, and value distributions. Helps with query planning, join optimization, and understanding data characteristics."),
+		mcp.WithString("catalog", mcp.Description("Trino catalog containing the table (optional)")),
+		mcp.WithString("schema", mcp.Description("Schema containing the table (optional)")),
+		mcp.WithString("table", mcp.Required(), mcp.Description("Table name to get statistics for"))),
+		applyMiddleware(h.ShowTableStats))
 }
