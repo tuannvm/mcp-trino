@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -77,7 +77,7 @@ jobs:
     needs: verify
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
 
@@ -109,7 +109,7 @@ jobs:
           sarif_file: "trivy-results.sarif"
           
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0.20.4
+        uses: anchore/sbom-action@v0.20.5
         with:
           format: spdx-json
           output-file: sbom.spdx.json
@@ -128,7 +128,7 @@ jobs:
     needs: verify
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
 
@@ -157,7 +157,7 @@ jobs:
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
 
