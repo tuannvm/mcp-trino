@@ -137,8 +137,15 @@ func (c *Client) ExecuteQuery(query string) ([]map[string]interface{}, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
 	defer cancel()
 
-	// Execute the query
-	rows, err := c.db.QueryContext(ctx, query)
+	// Execute the query with X-Trino-Source header if configured
+	var rows *sql.Rows
+	var err error
+	if c.config.TrinoSource != "" {
+		rows, err = c.db.QueryContext(ctx, query, sql.Named("X-Trino-Source", c.config.TrinoSource))
+	} else {
+		rows, err = c.db.QueryContext(ctx, query)
+	}
+	
 	if err != nil {
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}

@@ -35,6 +35,8 @@ type TrinoConfig struct {
 	OIDCClientID      string // OIDC client ID
 	OIDCClientSecret  string // OIDC client secret
 	OAuthRedirectURI  string // Fixed OAuth redirect URI (overrides dynamic callback)
+	// Custom Trino Source header
+	TrinoSource       string // Value for X-Trino-Source header
 }
 
 // NewTrinoConfig creates a new TrinoConfig with values from environment variables or defaults
@@ -102,6 +104,9 @@ func NewTrinoConfig() (*TrinoConfig, error) {
 		}
 	}
 
+	// Get Trino Source from env/config (no default)
+	trinoSource := getEnv("TRINO_SOURCE", "")
+
 	return &TrinoConfig{
 		Host:              getEnv("TRINO_HOST", "localhost"),
 		Port:              port,
@@ -114,6 +119,7 @@ func NewTrinoConfig() (*TrinoConfig, error) {
 		SSLInsecure:       sslInsecure,
 		AllowWriteQueries: allowWriteQueries,
 		QueryTimeout:      queryTimeout,
+		TrinoSource:       trinoSource,
 		OAuthEnabled:      oauthEnabled,
 		OAuthProvider:     oauthProvider,
 		JWTSecret:         jwtSecret,
