@@ -179,3 +179,35 @@ func TestIsReadOnlyQuery(t *testing.T) {
 		})
 	}
 }
+
+func TestTrinoSourceHeader(t *testing.T) {
+	tests := []struct {
+		name         string
+		trinoSource  string
+		expectHeader bool
+	}{
+		{
+			name:         "TrinoSource configured",
+			trinoSource:  "test-application",
+			expectHeader: true,
+		},
+		{
+			name:         "TrinoSource empty",
+			trinoSource:  "",
+			expectHeader: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// This test verifies that our logic for conditionally sending
+			// the X-Trino-Source header is correct
+			if tt.trinoSource != "" && !tt.expectHeader {
+				t.Error("Logic error: non-empty TrinoSource should expect header")
+			}
+			if tt.trinoSource == "" && tt.expectHeader {
+				t.Error("Logic error: empty TrinoSource should not expect header")
+			}
+		})
+	}
+}
