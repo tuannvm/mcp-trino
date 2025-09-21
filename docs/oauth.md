@@ -194,3 +194,136 @@ HTTPS_KEY_FILE=/etc/ssl/private/server.key \
 - HTTPS support for production deployments
 
 The OAuth implementation is production-ready and supports major OAuth providers through a secure, standards-compliant architecture.
+
+## Lessons Learned: Browser-Based MCP Client Compatibility
+
+This section captures critical lessons learned while implementing OAuth for browser-based MCP clients like MCP Inspector and Chatwise.
+
+### 1. OIDC Library Audience Configuration (Critical Bug)
+
+**Problem**: JWT validation inconsistency between go-oidc library and custom validation.
+
+**Root Cause**:
+```go
+// WRONG: go-oidc library was using ClientID for audience validation
+verifier := provider.Verifier(&oidc.Config{
+    ClientID: cfg.OIDCClientID,  // ❌ Used client ID instead of audience
+})
+```
+
+**Solution**:
+```go
+// CORRECT: Use the configured audience for validation
+verifier := provider.Verifier(&oidc.Config{
+    ClientID: cfg.OIDCAudience,  // ✅ Use audience claim for validation
+})
+```
+
+**Lesson**: The go-oidc library's `ClientID` field is used for audience validation, not client identification.
+
+### 2. CORS Headers for Browser Access (Critical)
+
+**Problem**: Browser-based MCP clients couldn't access OAuth endpoints due to CORS restrictions.
+
+**Solution**: Add CORS headers to API endpoints (but not redirect endpoints):
+```go
+// API endpoints need CORS
+w.Header().Set("Access-Control-Allow-Origin", "*")
+w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS") // Specific per endpoint
+w.Header().Set("Access-Control-Allow-Headers", "Authorization, *")
+w.Header().Set("Access-Control-Max-Age", "86400")
+
+// Handle OPTIONS preflight requests
+if r.Method == "OPTIONS" {
+    w.WriteHeader(http.StatusOK)
+    return
+}
+```
+
+**CORS-Enabled Endpoints**:
+- `/.well-known/oauth-authorization-server` - Metadata discovery
+- `/oauth/register` - Dynamic client registration
+- `/oauth/token` - Token exchange
+
+**No CORS Endpoints** (browser navigation):
+- `/oauth/authorize` - Authorization redirect
+- `/oauth/callback` - OAuth callback redirect
+
+### 3. OAuth Discovery Response Format
+
+**Problem**: MCP Inspector expected specific 401 response format for OAuth discovery.
+
+**Solution**: Match established patterns (like Atlassian MCP):
+```go
+// Required WWW-Authenticate header format
+w.Header().Set("WWW-Authenticate", fmt.Sprintf(
+    `Bearer realm="OAuth", error="invalid_token", error_description="Missing or invalid access token"`))
+
+// JSON response body
+{"error":"invalid_token","error_description":"Missing or invalid access token"}
+```
+
+### 4. HTTP Method Security vs CORS Compatibility
+
+**Best Practice**: Be honest about supported methods in CORS headers.
+```go
+// CORRECT: Advertise only what actually works
+w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+if r.Method != "POST" {
+    http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+```
+
+**Anti-Pattern**: Don't promise methods you don't support:
+```go
+// WRONG: Promise all methods but reject most
+w.Header().Set("Access-Control-Allow-Methods", "*")
+if r.Method != "POST" {
+    http.Error(w, "Method not allowed", http.StatusMethodNotAllowed) // Inconsistent!
+}
+```
+
+### 5. Multi-Client Testing Strategy
+
+**Client Compatibility Testing**:
+1. **Claude Code**: Native OAuth integration via mcp-remote
+2. **MCP Inspector**: Browser-based OAuth discovery and flow
+3. **Chatwise**: OAuth discovery recognition and flow initiation
+4. **curl**: Manual endpoint and CORS testing
+
+### 6. Security-First CORS Design
+
+**Principles**:
+- Only enable CORS on endpoints browsers call directly via fetch/XHR
+- Use specific method lists, not wildcards unless actually supported
+- Include `Authorization` header in allowed headers for JWT tokens
+- Use appropriate cache control headers (`Access-Control-Max-Age`)
+
+### Implementation Checklist
+
+**Core OAuth Security**:
+- [x] JWT audience validation (proper go-oidc configuration)
+- [x] PKCE support for public clients
+- [x] State parameter for CSRF protection
+- [x] Method restrictions on endpoints
+
+**Browser MCP Client Compatibility**:
+- [x] CORS headers on API endpoints only
+- [x] OPTIONS preflight request handling
+- [x] Standard OAuth discovery response format
+- [x] Compatible WWW-Authenticate header format
+- [x] Specific method allowlists in CORS headers
+
+**Multi-Client Support**:
+- [x] Claude Code compatibility (mcp-remote)
+- [x] MCP Inspector compatibility (browser-based)
+- [x] Chatwise compatibility (OAuth discovery)
+- [x] Dynamic client registration
+
+### Common Pitfalls to Avoid
+
+1. **go-oidc ClientID confusion**: Remember it's for audience validation
+2. **CORS wildcard promises**: Don't advertise methods you don't support
+3. **Missing preflight handling**: Always handle OPTIONS for CORS endpoints
+4. **Inconsistent error formats**: Match what existing clients expect
+5. **Redirect endpoint CORS**: These don't need CORS (browser navigation)
