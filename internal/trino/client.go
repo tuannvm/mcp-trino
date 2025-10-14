@@ -154,6 +154,9 @@ func sanitizeQueryForKeywordDetection(query string) string {
 
 // ExecuteQuery executes a SQL query and returns the results
 func (c *Client) ExecuteQuery(query string) ([]map[string]interface{}, error) {
+	// Strip trailing semicolon that Trino doesn't allow
+	query = strings.TrimSuffix(strings.TrimSpace(query), ";")
+
 	// SQL injection protection: only allow read-only queries unless explicitly allowed in config
 	if !c.config.AllowWriteQueries && !isReadOnlyQuery(query) {
 		return nil, fmt.Errorf("security restriction: only SELECT, SHOW, DESCRIBE, and EXPLAIN queries are allowed. " +
