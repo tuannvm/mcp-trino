@@ -31,20 +31,32 @@ type TrinoConfig struct {
 	JWTSecret     string // JWT signing secret for HMAC provider
 
 	// OIDC provider configuration
-	OIDCIssuer       string // OIDC issuer URL
-	OIDCAudience     string // OIDC audience
-	OIDCClientID     string // OIDC client ID
-	OIDCClientSecret       string // OIDC client secret
-	OAuthRedirectURIs      string // OAuth redirect URIs - single URI or comma-separated list
+	OIDCIssuer        string // OIDC issuer URL
+	OIDCAudience      string // OIDC audience
+	OIDCClientID      string // OIDC client ID
+	OIDCClientSecret  string // OIDC client secret
+	OAuthRedirectURIs string // OAuth redirect URIs - single URI or comma-separated list
 
 	// Allowlist configuration for filtering catalogs, schemas, and tables
 	AllowedCatalogs []string // List of allowed catalogs (empty means no filtering)
 	AllowedSchemas  []string // List of allowed schemas in catalog.schema format
 	AllowedTables   []string // List of allowed tables in catalog.schema.table format
+
+	// Impersonation configuration
+	EnableImpersonation bool   // Enable Trino user impersonation via X-Trino-User header
+	ImpersonationField  string // JWT field to use for impersonation: "username", "email", or "subject" (default: "username")
+
+	// Query attribution
+	TrinoSource string // Value for X-Trino-Source header (identifies query source to Trino)
 }
 
 // NewTrinoConfig creates a new TrinoConfig with values from environment variables or defaults
 func NewTrinoConfig() (*TrinoConfig, error) {
+	return NewTrinoConfigWithVersion("dev")
+}
+
+// NewTrinoConfigWithVersion creates a new TrinoConfig with a specific version for X-Trino-Source
+func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 	port, _ := strconv.Atoi(getEnv("TRINO_PORT", "8080"))
 	ssl, _ := strconv.ParseBool(getEnv("TRINO_SSL", "true"))
 	sslInsecure, _ := strconv.ParseBool(getEnv("TRINO_SSL_INSECURE", "true"))
@@ -95,6 +107,17 @@ func NewTrinoConfig() (*TrinoConfig, error) {
 	allowedSchemas := parseAllowlist(getEnv("TRINO_ALLOWED_SCHEMAS", ""))
 	allowedTables := parseAllowlist(getEnv("TRINO_ALLOWED_TABLES", ""))
 
+	// Parse impersonation configuration
+	enableImpersonation, _ := strconv.ParseBool(getEnv("TRINO_ENABLE_IMPERSONATION", "false"))
+	impersonationField := strings.ToLower(getEnv("TRINO_IMPERSONATION_FIELD", "username"))
+
+	// Parse Trino source configuration with default
+	trinoSource := getEnv("TRINO_SOURCE", fmt.Sprintf("mcp-trino/%s", version))
+	if trinoSource == "" {
+		// If explicitly set to empty, use default
+		trinoSource = fmt.Sprintf("mcp-trino/%s", version)
+	}
+
 	// Validate allowlist formats
 	if err := validateAllowlist("TRINO_ALLOWED_SCHEMAS", allowedSchemas, 1); err != nil { // Must have catalog.schema format
 		return nil, err
@@ -134,30 +157,53 @@ func NewTrinoConfig() (*TrinoConfig, error) {
 	// Log allowlist configuration
 	logAllowlistConfiguration(allowedCatalogs, allowedSchemas, allowedTables)
 
+	// Validate impersonation field
+	validFields := map[string]bool{"username": true, "email": true, "subject": true}
+	if !validFields[impersonationField] {
+		return nil, fmt.Errorf("invalid TRINO_IMPERSONATION_FIELD '%s'. Supported fields: username, email, subject", impersonationField)
+	}
+
+	// Log impersonation configuration
+	if enableImpersonation {
+		log.Printf("INFO: Trino user impersonation enabled (TRINO_ENABLE_IMPERSONATION=true)")
+		log.Printf("INFO: Impersonation principal field: %s", impersonationField)
+		if !oauthEnabled {
+			log.Println("WARNING: Impersonation is enabled but OAuth is disabled. Impersonation requires OAuth to extract user information.")
+		}
+	} else {
+		log.Println("INFO: Trino user impersonation disabled (TRINO_ENABLE_IMPERSONATION=false)")
+	}
+
+	// Log query attribution configuration
+	log.Printf("INFO: Trino query source attribution: %s", trinoSource)
+
 	return &TrinoConfig{
-		Host:              getEnv("TRINO_HOST", "localhost"),
-		Port:              port,
-		User:              getEnv("TRINO_USER", "trino"),
-		Password:          getEnv("TRINO_PASSWORD", ""),
-		Catalog:           getEnv("TRINO_CATALOG", "memory"),
-		Schema:            getEnv("TRINO_SCHEMA", "default"),
-		Scheme:            scheme,
-		SSL:               ssl,
-		SSLInsecure:       sslInsecure,
-		AllowWriteQueries: allowWriteQueries,
-		QueryTimeout:      queryTimeout,
-		OAuthEnabled:      oauthEnabled,
-		OAuthMode:         oauthMode,
-		OAuthProvider:     oauthProvider,
-		JWTSecret:         jwtSecret,
-		OIDCIssuer:        oidcIssuer,
-		OIDCAudience:      oidcAudience,
-		OIDCClientID:      oidcClientID,
-		OIDCClientSecret:     oidcClientSecret,
-		OAuthRedirectURIs:    oauthRedirectURIs,
-		AllowedCatalogs:   allowedCatalogs,
-		AllowedSchemas:    allowedSchemas,
-		AllowedTables:     allowedTables,
+		Host:                getEnv("TRINO_HOST", "localhost"),
+		Port:                port,
+		User:                getEnv("TRINO_USER", "trino"),
+		Password:            getEnv("TRINO_PASSWORD", ""),
+		Catalog:             getEnv("TRINO_CATALOG", "memory"),
+		Schema:              getEnv("TRINO_SCHEMA", "default"),
+		Scheme:              scheme,
+		SSL:                 ssl,
+		SSLInsecure:         sslInsecure,
+		AllowWriteQueries:   allowWriteQueries,
+		QueryTimeout:        queryTimeout,
+		OAuthEnabled:        oauthEnabled,
+		OAuthMode:           oauthMode,
+		OAuthProvider:       oauthProvider,
+		JWTSecret:           jwtSecret,
+		OIDCIssuer:          oidcIssuer,
+		OIDCAudience:        oidcAudience,
+		OIDCClientID:        oidcClientID,
+		OIDCClientSecret:    oidcClientSecret,
+		OAuthRedirectURIs:   oauthRedirectURIs,
+		AllowedCatalogs:     allowedCatalogs,
+		AllowedSchemas:      allowedSchemas,
+		AllowedTables:       allowedTables,
+		EnableImpersonation: enableImpersonation,
+		ImpersonationField:  impersonationField,
+		TrinoSource:         trinoSource,
 	}, nil
 }
 

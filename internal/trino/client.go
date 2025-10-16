@@ -3,41 +3,84 @@ package trino
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"log"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
 
-	_ "github.com/trinodb/trino-go-client/trino"
+	"github.com/trinodb/trino-go-client/trino"
 	"github.com/tuannvm/mcp-trino/internal/config"
 )
 
+// Context key for impersonated user
+type contextKey string
+
+const (
+	impersonatedUserKey contextKey = "impersonated_user"
+)
+
+// headerRoundTripper adds X-Trino-Source and X-Trino-User headers to requests
+type headerRoundTripper struct {
+	base   http.RoundTripper
+	config *config.TrinoConfig
+}
+
+func (t *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	req = req.Clone(req.Context())
+
+	// Set X-Trino-Source header for query attribution
+	if t.config.TrinoSource != "" {
+		req.Header.Set("X-Trino-Source", t.config.TrinoSource)
+	}
+
+	// Set X-Trino-User header if impersonation is enabled
+	if t.config.EnableImpersonation {
+		if user, ok := req.Context().Value(impersonatedUserKey).(string); ok && user != "" {
+			req.Header.Set("X-Trino-User", user)
+		}
+	}
+
+	return t.base.RoundTrip(req)
+}
+
 // Client is a wrapper around Trino client
 type Client struct {
-	db      *sql.DB
-	config  *config.TrinoConfig
-	timeout time.Duration
+	db        *sql.DB
+	connector driver.Connector
+	config    *config.TrinoConfig
+	timeout   time.Duration
 }
 
 // NewClient creates a new Trino client
 func NewClient(cfg *config.TrinoConfig) (*Client, error) {
-	dsn := fmt.Sprintf("%s://%s:%s@%s:%d?catalog=%s&schema=%s&SSL=%t&SSLInsecure=%t",
-		cfg.Scheme,
-		url.QueryEscape(cfg.User),
-		url.QueryEscape(cfg.Password),
-		cfg.Host,
-		cfg.Port,
-		url.QueryEscape(cfg.Catalog),
-		url.QueryEscape(cfg.Schema),
-		cfg.SSL,
-		cfg.SSLInsecure)
+	dsnURL := url.URL{
+		Scheme: cfg.Scheme,
+		User:   url.UserPassword(cfg.User, cfg.Password),
+		Host:   fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+	}
 
-	// The Trino driver registers itself with database/sql on import
-	// We can just use sql.Open directly with the trino driver
+	params := url.Values{}
+	params.Add("catalog", cfg.Catalog)
+	params.Add("schema", cfg.Schema)
+	params.Add("SSL", fmt.Sprintf("%t", cfg.SSL))
+	params.Add("SSLInsecure", fmt.Sprintf("%t", cfg.SSLInsecure))
+	params.Add("custom_client", "mcp-trino")
 
-	// Open a connection
+	dsnURL.RawQuery = params.Encode()
+	dsn := dsnURL.String()
+
+	httpClient := &http.Client{
+		Transport: &headerRoundTripper{
+			base:   http.DefaultTransport,
+			config: cfg,
+		},
+	}
+	trino.RegisterCustomClient("mcp-trino", httpClient)
+
 	db, err := sql.Open("trino", dsn)
 	if err != nil {
 		// Sanitize error to prevent password exposure
@@ -71,6 +114,17 @@ func NewClient(cfg *config.TrinoConfig) (*Client, error) {
 // Close closes the database connection
 func (c *Client) Close() error {
 	return c.db.Close()
+}
+
+// WithImpersonatedUser adds impersonated user to context
+func WithImpersonatedUser(ctx context.Context, username string) context.Context {
+	return context.WithValue(ctx, impersonatedUserKey, username)
+}
+
+// GetImpersonatedUser retrieves impersonated user from context
+func GetImpersonatedUser(ctx context.Context) (string, bool) {
+	user, ok := ctx.Value(impersonatedUserKey).(string)
+	return user, ok
 }
 
 // isReadOnlyQuery checks if the SQL query is read-only (SELECT, SHOW, DESCRIBE, EXPLAIN)
@@ -219,6 +273,11 @@ func sanitizeQueryForKeywordDetection(query string) string {
 
 // ExecuteQuery executes a SQL query and returns the results
 func (c *Client) ExecuteQuery(query string) ([]map[string]interface{}, error) {
+	return c.ExecuteQueryWithContext(context.Background(), query)
+}
+
+// ExecuteQueryWithContext executes a SQL query and returns the results
+func (c *Client) ExecuteQueryWithContext(ctx context.Context, query string) ([]map[string]interface{}, error) {
 	// Strip trailing semicolon that Trino doesn't allow
 	query = strings.TrimSuffix(strings.TrimSpace(query), ";")
 
@@ -228,11 +287,19 @@ func (c *Client) ExecuteQuery(query string) ([]map[string]interface{}, error) {
 			"Set TRINO_ALLOW_WRITE_QUERIES=true to enable write operations (at your own risk)")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	// Create context with timeout, preserving any impersonation data
+	queryCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
+	// Log impersonation if enabled
+	if c.config.EnableImpersonation {
+		if user, ok := GetImpersonatedUser(queryCtx); ok {
+			log.Printf("Trino: Executing query with impersonated user: %s", user)
+		}
+	}
+
 	// Execute the query
-	rows, err := c.db.QueryContext(ctx, query)
+	rows, err := c.db.QueryContext(queryCtx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}

@@ -23,7 +23,7 @@ func main() {
 
 	// Initialize Trino configuration
 	log.Println("Loading Trino configuration...")
-	trinoConfig, err := config.NewTrinoConfig()
+	trinoConfig, err := config.NewTrinoConfigWithVersion(Version)
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}

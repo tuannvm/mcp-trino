@@ -56,7 +56,7 @@ func createMCPServer(trinoClient *trino.Client, trinoConfig *config.TrinoConfig,
 
 	mcpServer := mcpserver.NewMCPServer("Trino MCP Server", version, options...)
 
-	trinoHandlers := &TrinoHandlers{TrinoClient: trinoClient}
+	trinoHandlers := NewTrinoHandlers(trinoClient, trinoConfig)
 	RegisterTrinoTools(mcpServer, trinoHandlers)
 
 	return mcpServer, oauthServer

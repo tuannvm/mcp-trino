@@ -8,23 +8,53 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/tuannvm/mcp-trino/internal/config"
+	oauth "github.com/tuannvm/oauth-mcp-proxy"
 	"github.com/tuannvm/mcp-trino/internal/trino"
 )
 
 // TrinoHandlers contains all handlers for Trino-related tools
 type TrinoHandlers struct {
 	TrinoClient *trino.Client
+	Config      *config.TrinoConfig
 }
 
 // NewTrinoHandlers creates a new set of Trino handlers
-func NewTrinoHandlers(client *trino.Client) *TrinoHandlers {
+func NewTrinoHandlers(client *trino.Client, cfg *config.TrinoConfig) *TrinoHandlers {
 	return &TrinoHandlers{
 		TrinoClient: client,
+		Config:      cfg,
 	}
+}
+
+// prepareImpersonationContext adds impersonated user to context
+func (h *TrinoHandlers) prepareImpersonationContext(ctx context.Context) context.Context {
+	if user, ok := oauth.GetUserFromContext(ctx); ok {
+		var principal string
+		switch h.Config.ImpersonationField {
+		case "email":
+			principal = user.Email
+		case "subject":
+			principal = user.Subject
+		case "username":
+			fallthrough
+		default:
+			principal = user.Username
+		}
+
+		if principal != "" {
+			log.Printf("MCP: Preparing impersonation context for %s: %s", h.Config.ImpersonationField, principal)
+			return trino.WithImpersonatedUser(ctx, principal)
+		}
+	}
+	return ctx
 }
 
 // ExecuteQuery handles query execution
 func (h *TrinoHandlers) ExecuteQuery(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+    if h.Config.EnableImpersonation {
+        ctx = h.prepareImpersonationContext(ctx)
+    }
 
 	// Type assert Arguments to map[string]interface{}
 	args, ok := request.Params.Arguments.(map[string]interface{})
@@ -40,8 +70,7 @@ func (h *TrinoHandlers) ExecuteQuery(ctx context.Context, request mcp.CallToolRe
 		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil
 	}
 
-	// Execute the query - SQL injection protection is handled within the client
-	results, err := h.TrinoClient.ExecuteQuery(query)
+	results, err := h.TrinoClient.ExecuteQueryWithContext(ctx, query)
 	if err != nil {
 		log.Printf("Error executing query: %v", err)
 		mcpErr := fmt.Errorf("query execution failed: %w", err)
