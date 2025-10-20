@@ -9,63 +9,68 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
 	mcpserver "github.com/mark3labs/mcp-go/server"
+	oauth "github.com/tuannvm/oauth-mcp-proxy"
 	"github.com/tuannvm/mcp-trino/internal/config"
-	"github.com/tuannvm/mcp-trino/internal/oauth"
 	"github.com/tuannvm/mcp-trino/internal/trino"
 )
 
-// Server represents the MCP server with all its components
+// Server represents the MCP server with all components
 type Server struct {
-	mcpServer    *mcpserver.MCPServer
-	config       *config.TrinoConfig
-	version      string
-	oauthHandler *oauth.OAuth2Handler
+	mcpServer   *mcpserver.MCPServer
+	config      *config.TrinoConfig
+	version     string
+	oauthServer *oauth.Server // oauth-mcp-proxy Server (nil if OAuth disabled)
 }
 
 // NewServer creates a new MCP server instance with all components
 func NewServer(trinoClient *trino.Client, trinoConfig *config.TrinoConfig, version string) *Server {
-	// Create MCP server
-	mcpServer := createMCPServer(trinoClient, trinoConfig, version)
-
-	// Create OAuth2 handler if OAuth is enabled
-	var oauthHandler *oauth.OAuth2Handler
-	if trinoConfig.OAuthEnabled {
-		oauthHandler = oauth.CreateOAuth2Handler(trinoConfig, version)
-	}
+	// Create MCP server with OAuth if enabled
+	mcpServer, oauthServer := createMCPServer(trinoClient, trinoConfig, version)
 
 	return &Server{
-		mcpServer:    mcpServer,
-		config:       trinoConfig,
-		version:      version,
-		oauthHandler: oauthHandler,
+		mcpServer:   mcpServer,
+		config:      trinoConfig,
+		version:     version,
+		oauthServer: oauthServer,
 	}
 }
 
 // createMCPServer creates the core MCP server with tools and authentication
-func createMCPServer(trinoClient *trino.Client, trinoConfig *config.TrinoConfig, version string) *mcpserver.MCPServer {
-	// Create hooks for server-level authentication
-	hooks := &mcpserver.Hooks{}
-
-	mcpServer := mcpserver.NewMCPServer("Trino MCP Server", version,
+func createMCPServer(trinoClient *trino.Client, trinoConfig *config.TrinoConfig, version string) (*mcpserver.MCPServer, *oauth.Server) {
+	// Build server options
+	options := []mcpserver.ServerOption{
 		mcpserver.WithToolCapabilities(true),
-		mcpserver.WithHooks(hooks),
-	)
-
-	// Setup OAuth authentication with provider support
-	if err := setupOAuthServer(trinoConfig, mcpServer); err != nil {
-		log.Printf("Warning: Failed to setup OAuth server: %v", err)
 	}
+
+	// Setup OAuth if enabled
+	var oauthServer *oauth.Server
+	if trinoConfig.OAuthEnabled {
+		// Convert TrinoConfig to oauth.Config
+		oauthCfg := trinoConfigToOAuthConfig(trinoConfig)
+
+		// Create OAuth server
+		var err error
+		oauthServer, err = oauth.NewServer(oauthCfg)
+		if err != nil {
+			log.Printf("ERROR: Failed to create OAuth server: %v", err)
+		} else {
+			// Add OAuth middleware to server options
+			options = append(options, mcpserver.WithToolHandlerMiddleware(oauthServer.Middleware()))
+			log.Printf("INFO: OAuth enabled with provider: %s, mode: %s", trinoConfig.OAuthProvider, trinoConfig.OAuthMode)
+		}
+	}
+
+	mcpServer := mcpserver.NewMCPServer("Trino MCP Server", version, options...)
 
 	// Initialize tool handlers
 	trinoHandlers := &TrinoHandlers{TrinoClient: trinoClient}
 	RegisterTrinoTools(mcpServer, trinoHandlers)
 
-	return mcpServer
+	return mcpServer, oauthServer
 }
 
 // ServeStdio starts the MCP server with STDIO transport
@@ -79,28 +84,17 @@ func (s *Server) ServeHTTP(port string) error {
 
 	// Create StreamableHTTP server instance
 	log.Println("Setting up StreamableHTTP server...")
+
+	// Build streamable server with OAuth context extraction if enabled
 	var streamableServer *mcpserver.StreamableHTTPServer
 	if s.config.OAuthEnabled {
-		// Create OAuth-aware HTTP context function
-		oauthContextFunc := func(ctx context.Context, r *http.Request) context.Context {
-			authHeader := r.Header.Get("Authorization")
-			if strings.HasPrefix(authHeader, "Bearer ") {
-				token := strings.TrimPrefix(authHeader, "Bearer ")
-				token = strings.TrimSpace(token)
-				ctx = oauth.WithOAuthToken(ctx, token)
-				log.Printf("OAuth: Token extracted from request (length: %d)", len(token))
-			} else {
-				log.Printf("OAuth: No valid Authorization header found")
-			}
-			return ctx
-		}
-
 		streamableServer = mcpserver.NewStreamableHTTPServer(
 			s.mcpServer,
 			mcpserver.WithEndpointPath("/mcp"),
-			mcpserver.WithHTTPContextFunc(oauthContextFunc),
+			mcpserver.WithHTTPContextFunc(oauth.CreateHTTPContextFunc()),
 			mcpserver.WithStateLess(false),
 		)
+		log.Println("INFO: OAuth context extraction enabled")
 	} else {
 		streamableServer = mcpserver.NewStreamableHTTPServer(
 			s.mcpServer,
@@ -115,44 +109,23 @@ func (s *Server) ServeHTTP(port string) error {
 	// Add status endpoint
 	mux.HandleFunc("/status", s.handleStatus)
 
-	// Add HTTPS enforcement middleware for proxy mode (Phase 3 implementation)
-	httpsEnforcement := s.createHTTPSEnforcementMiddleware()
+	// Register OAuth endpoints if enabled
+	if s.config.OAuthEnabled && s.oauthServer != nil {
+		// oauth-mcp-proxy automatically registers all OAuth endpoints:
+		// - /.well-known/oauth-authorization-server
+		// - /.well-known/oauth-protected-resource
+		// - /.well-known/openid-configuration
+		// - /.well-known/jwks.json
+		// - /oauth/authorize, /oauth/callback, /oauth/token (proxy mode only)
+		s.oauthServer.RegisterHandlers(mux)
+		log.Printf("INFO: OAuth endpoints registered via oauth-mcp-proxy")
 
-	// Add OAuth metadata endpoints for MCP compliance
-	if s.config.OAuthEnabled && s.oauthHandler != nil {
-		// OIDC Discovery endpoint (RFC 8414) - required for MCP clients (Claude Code, Desktop, claude.ai)
-		mux.HandleFunc("/.well-known/openid_configuration", s.oauthHandler.HandleOIDCDiscovery)
-
-		// RFC 8414: OAuth 2.0 Authorization Server Metadata
-		mux.HandleFunc("/.well-known/oauth-authorization-server", s.oauthHandler.HandleAuthorizationServerMetadata)
-		// RFC 9728: OAuth 2.0 Protected Resource Metadata
-		mux.HandleFunc("/.well-known/oauth-protected-resource", s.oauthHandler.HandleProtectedResourceMetadata)
-		// Legacy endpoint for backward compatibility
-		mux.HandleFunc("/.well-known/oauth-metadata", s.oauthHandler.HandleMetadata)
-
-		// Conditional route registration based on OAuth mode (Phase 1 implementation)
-		if s.config.OAuthMode == "proxy" {
-			// Proxy mode: Register OAuth flow endpoints with HTTPS enforcement
-			mux.HandleFunc("/oauth/authorize", httpsEnforcement(s.oauthHandler.HandleAuthorize))
-			mux.HandleFunc("/oauth/callback", httpsEnforcement(s.oauthHandler.HandleCallback))
-			mux.HandleFunc("/oauth/register", httpsEnforcement(s.oauthHandler.HandleRegister))
-			mux.HandleFunc("/oauth/token", httpsEnforcement(s.oauthHandler.HandleToken))
-			mux.HandleFunc("/callback", httpsEnforcement(s.oauthHandler.HandleCallbackRedirect))
-
-			// JWKS endpoint for proxy mode only
-			mux.HandleFunc("/.well-known/jwks.json", s.oauthHandler.HandleJWKS)
-
-			log.Printf("INFO: OAuth proxy mode - registered OAuth flow endpoints with HTTPS enforcement")
-		} else {
-			// Native mode: OAuth endpoints are not registered
-			log.Printf("INFO: OAuth native mode - OAuth flow endpoints disabled")
-		}
-
-		// Add OAuth discovery endpoints at /mcp path for mcp-remote 0.1.19+ compatibility
+		// Add compatibility endpoints for mcp-remote 0.1.19+
 		// mcp-remote incorrectly appends /.well-known/* to the full MCP endpoint URL
-		mux.HandleFunc("/mcp/.well-known/oauth-authorization-server", s.oauthHandler.HandleAuthorizationServerMetadata)
-		mux.HandleFunc("/mcp/.well-known/openid_configuration", s.oauthHandler.HandleOIDCDiscovery)
-
+		// TODO: Remove after mcp-remote is fixed
+		// Note: These need to use the internal handler from oauth-mcp-proxy
+		// For now, we'll skip these - clients should use correct endpoints
+		log.Printf("INFO: OAuth mode: %s, provider: %s", s.config.OAuthMode, s.config.OAuthProvider)
 	}
 
 	// Shared MCP handler function for both endpoints
@@ -178,31 +151,24 @@ func (s *Server) ServeHTTP(port string) error {
 		certFile := getEnv("HTTPS_CERT_FILE", "")
 		keyFile := getEnv("HTTPS_KEY_FILE", "")
 
-		var oauth2Config *oauth.OAuth2Config
-		if s.oauthHandler != nil {
-			oauth2Config = s.oauthHandler.GetConfig()
-		} else {
-			mcpHost := getEnv("MCP_HOST", "localhost")
-			mcpPort := getEnv("MCP_PORT", "8080")
-			scheme := s.getScheme()
-			mcpURL := getEnv("MCP_URL", fmt.Sprintf("%s://%s:%s", scheme, mcpHost, mcpPort))
-			oauth2Config = &oauth.OAuth2Config{
-				MCPURL: mcpURL,
-			}
-		}
+		// Determine MCP server URL for status endpoint
+		mcpHost := getEnv("MCP_HOST", "localhost")
+		mcpPort := getEnv("MCP_PORT", "8080")
+		scheme := s.getScheme()
+		mcpURL := getEnv("MCP_URL", fmt.Sprintf("%s://%s:%s", scheme, mcpHost, mcpPort))
 
 		if certFile != "" && keyFile != "" {
 			// Start HTTPS server
 			oauthStatus := s.getOAuthStatus()
 
 			log.Printf("Starting HTTPS server on %s%s", addr, oauthStatus)
-			log.Printf("  - Modern endpoint: %s/mcp", oauth2Config.MCPURL)
-			log.Printf("  - Legacy endpoint: %s/sse (backward compatibility)", oauth2Config.MCPURL)
-			log.Printf("  - OAuth metadata: %s/.well-known/oauth-authorization-server", oauth2Config.MCPURL)
-			log.Printf("  - OAuth metadata (legacy): %s/.well-known/oauth-metadata", oauth2Config.MCPURL)
+			log.Printf("  - Modern endpoint: %s/mcp", mcpURL)
+			log.Printf("  - Legacy endpoint: %s/sse (backward compatibility)", mcpURL)
+			log.Printf("  - OAuth metadata: %s/.well-known/oauth-authorization-server", mcpURL)
+			log.Printf("  - OAuth metadata (legacy): %s/.well-known/oauth-metadata", mcpURL)
 			if s.config.OAuthEnabled {
-				log.Printf("  - OAuth callback: %s/oauth/callback", oauth2Config.MCPURL)
-				log.Printf("  - OAuth callback (Claude Code): %s/callback (redirects to /oauth/callback)", oauth2Config.MCPURL)
+				log.Printf("  - OAuth callback: %s/oauth/callback", mcpURL)
+				log.Printf("  - OAuth callback (Claude Code): %s/callback (redirects to /oauth/callback)", mcpURL)
 			}
 
 			if err := httpServer.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
@@ -213,13 +179,13 @@ func (s *Server) ServeHTTP(port string) error {
 			oauthStatus := s.getOAuthStatusWithWarning()
 
 			log.Printf("Starting HTTP server on %s%s", addr, oauthStatus)
-			log.Printf("  - Modern endpoint: %s/mcp", oauth2Config.MCPURL)
-			log.Printf("  - Legacy endpoint: %s/sse (backward compatibility)", oauth2Config.MCPURL)
-			log.Printf("  - OAuth metadata: %s/.well-known/oauth-authorization-server", oauth2Config.MCPURL)
-			log.Printf("  - OAuth metadata (legacy): %s/.well-known/oauth-metadata", oauth2Config.MCPURL)
+			log.Printf("  - Modern endpoint: %s/mcp", mcpURL)
+			log.Printf("  - Legacy endpoint: %s/sse (backward compatibility)", mcpURL)
+			log.Printf("  - OAuth metadata: %s/.well-known/oauth-authorization-server", mcpURL)
+			log.Printf("  - OAuth metadata (legacy): %s/.well-known/oauth-metadata", mcpURL)
 			if s.config.OAuthEnabled {
-				log.Printf("  - OAuth callback: %s/oauth/callback", oauth2Config.MCPURL)
-				log.Printf("  - OAuth callback (Claude Code): %s/callback (redirects to /oauth/callback)", oauth2Config.MCPURL)
+				log.Printf("  - OAuth callback: %s/oauth/callback", mcpURL)
+				log.Printf("  - OAuth callback (Claude Code): %s/callback (redirects to /oauth/callback)", mcpURL)
 			}
 
 			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -266,8 +232,11 @@ func (s *Server) createMCPHandler(streamableServer *mcpserver.StreamableHTTPServ
 				// Return 401 with OAuth discovery information
 				log.Printf("OAuth: No bearer token provided, returning 401 with discovery info")
 
-				// Use consistent MCP URL from OAuth handler configuration
-				mcpURL := s.oauthHandler.GetConfig().MCPURL
+				// Calculate MCP URL for OAuth discovery
+				mcpHost := getEnv("MCP_HOST", "localhost")
+				mcpPort := getEnv("MCP_PORT", "8080")
+				scheme := s.getScheme()
+				mcpURL := getEnv("MCP_URL", fmt.Sprintf("%s://%s:%s", scheme, mcpHost, mcpPort))
 
 				// Multiple WWW-Authenticate headers for broad client compatibility (RFC 7235)
 				// Standard OAuth 2.0 Bearer challenge for traditional clients
@@ -340,77 +309,31 @@ func (s *Server) getOAuthStatusWithWarning() string {
 	return " (OAuth disabled)"
 }
 
-// setupOAuthServer initializes OAuth validation and sets up MCP server with middleware
-func setupOAuthServer(cfg *config.TrinoConfig, mcpServer *mcpserver.MCPServer) error {
-	if !cfg.OAuthEnabled {
-		log.Println("OAuth authentication disabled")
-		return nil
-	}
 
-	// Initialize OAuth provider using oauth package
-	validator, err := oauth.SetupOAuth(cfg)
-	if err != nil {
-		return fmt.Errorf("failed to setup OAuth: %w", err)
-	}
-
-	if validator == nil {
-		return nil // OAuth disabled
-	}
-
-	// Apply OAuth middleware to server
-	if err := applyOAuthMiddleware(mcpServer, validator, cfg.OAuthEnabled); err != nil {
-		return fmt.Errorf("failed to apply OAuth middleware: %w", err)
-	}
-
-	return nil
-}
-
-// applyOAuthMiddleware applies OAuth middleware to the MCP server
-func applyOAuthMiddleware(mcpServer *mcpserver.MCPServer, validator oauth.TokenValidator, enabled bool) error {
-	// Create middleware function
-	middleware := oauth.OAuthMiddleware(validator, enabled)
-
-	// Store the middleware in the server for use during tool handler registration
-	// This will be applied when handlers are registered
-	setOAuthMiddleware(mcpServer, middleware)
-
-	return nil
-}
-
-// Middleware storage for the MCP server
-var (
-	serverMiddleware   = make(map[*mcpserver.MCPServer]func(mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc)
-	serverMiddlewareMu sync.RWMutex
-)
-
-// setOAuthMiddleware stores the OAuth middleware for a server
-func setOAuthMiddleware(mcpServer *mcpserver.MCPServer, middleware func(mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc) {
-	serverMiddlewareMu.Lock()
-	defer serverMiddlewareMu.Unlock()
-	serverMiddleware[mcpServer] = middleware
-}
-
-// GetOAuthMiddleware retrieves the OAuth middleware for a server
-func GetOAuthMiddleware(mcpServer *mcpserver.MCPServer) func(mcpserver.ToolHandlerFunc) mcpserver.ToolHandlerFunc {
-	serverMiddlewareMu.RLock()
-	defer serverMiddlewareMu.RUnlock()
-	return serverMiddleware[mcpServer]
-}
-
-// createHTTPSEnforcementMiddleware creates HTTPS enforcement middleware for proxy mode
-func (s *Server) createHTTPSEnforcementMiddleware() func(http.HandlerFunc) http.HandlerFunc {
-	return func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			// Check if request is secure (direct TLS or via trusted proxy)
-			isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
-
-			if !isSecure && s.config.OAuthMode == "proxy" {
-				log.Printf("SECURITY: Rejected non-HTTPS OAuth request from %s to %s", r.RemoteAddr, r.URL.Path)
-				http.Error(w, "HTTPS required for OAuth endpoints", http.StatusForbidden)
-				return
-			}
-			next(w, r)
+// trinoConfigToOAuthConfig converts TrinoConfig to oauth.Config for oauth-mcp-proxy
+func trinoConfigToOAuthConfig(cfg *config.TrinoConfig) *oauth.Config {
+	// Determine server URL for proxy mode
+	serverURL := getEnv("MCP_URL", "")
+	if serverURL == "" {
+		mcpHost := getEnv("MCP_HOST", "localhost")
+		mcpPort := getEnv("MCP_PORT", "8080")
+		scheme := "http"
+		if getEnv("HTTPS_CERT_FILE", "") != "" && getEnv("HTTPS_KEY_FILE", "") != "" {
+			scheme = "https"
 		}
+		serverURL = fmt.Sprintf("%s://%s:%s", scheme, mcpHost, mcpPort)
+	}
+
+	return &oauth.Config{
+		Mode:         cfg.OAuthMode,
+		Provider:     cfg.OAuthProvider,
+		RedirectURIs: cfg.OAuthRedirectURIs,
+		Issuer:       cfg.OIDCIssuer,
+		Audience:     cfg.OIDCAudience,
+		ClientID:     cfg.OIDCClientID,
+		ClientSecret: cfg.OIDCClientSecret,
+		ServerURL:    serverURL,
+		JWTSecret:    []byte(cfg.JWTSecret),
 	}
 }
 

@@ -1,19 +1,19 @@
 module github.com/tuannvm/mcp-trino
 
-go 1.24.6
+go 1.25.1
 
 require (
-	github.com/coreos/go-oidc/v3 v3.15.0
+	github.com/coreos/go-oidc/v3 v3.16.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
-	github.com/mark3labs/mcp-go v0.38.0
+	github.com/mark3labs/mcp-go v0.41.1
 	github.com/trinodb/trino-go-client v0.328.0
-	golang.org/x/oauth2 v0.30.0
+	golang.org/x/oauth2 v0.32.0
 )
 
 require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
-	github.com/go-jose/go-jose/v4 v4.0.5 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
@@ -27,6 +27,7 @@ require (
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/pierrec/lz4 v2.6.1+incompatible // indirect
 	github.com/spf13/cast v1.8.0 // indirect
+	github.com/tuannvm/oauth-mcp-proxy v0.0.2-0.20251019235031-354aec417a41 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/crypto v0.37.0 // indirect
