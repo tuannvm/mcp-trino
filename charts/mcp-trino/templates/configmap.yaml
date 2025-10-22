@@ -43,4 +43,7 @@ data:
   {{- if .Values.trino.oauth.oidc.clientId }}
   OIDC_CLIENT_ID: {{ .Values.trino.oauth.oidc.clientId | quote }}
   {{- end }}
+  {{- if .Values.trino.oauth.oidc.clientSecret }}
+  OIDC_CLIENT_SECRET: {{ .Values.trino.oauth.oidc.clientSecret| quote }}
+  {{- end }}
   {{- end }}
