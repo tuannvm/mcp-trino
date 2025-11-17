@@ -355,7 +355,12 @@ func (c *Client) ExecuteQueryWithContext(ctx context.Context, query string) ([]m
 
 // ListCatalogs returns a list of available catalogs
 func (c *Client) ListCatalogs() ([]string, error) {
-	results, err := c.ExecuteQuery("SHOW CATALOGS")
+	return c.ListCatalogsWithContext(context.Background())
+}
+
+// ListCatalogsWithContext returns a list of available catalogs with context
+func (c *Client) ListCatalogsWithContext(ctx context.Context) ([]string, error) {
+	results, err := c.ExecuteQueryWithContext(ctx, "SHOW CATALOGS")
 	if err != nil {
 		return nil, err
 	}
@@ -377,12 +382,17 @@ func (c *Client) ListCatalogs() ([]string, error) {
 
 // ListSchemas returns a list of schemas in the specified catalog
 func (c *Client) ListSchemas(catalog string) ([]string, error) {
+	return c.ListSchemasWithContext(context.Background(), catalog)
+}
+
+// ListSchemasWithContext returns a list of schemas in the specified catalog with context
+func (c *Client) ListSchemasWithContext(ctx context.Context, catalog string) ([]string, error) {
 	if catalog == "" {
 		catalog = c.config.Catalog
 	}
 
 	query := fmt.Sprintf("SHOW SCHEMAS FROM %s", catalog)
-	results, err := c.ExecuteQuery(query)
+	results, err := c.ExecuteQueryWithContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -404,6 +414,11 @@ func (c *Client) ListSchemas(catalog string) ([]string, error) {
 
 // ListTables returns a list of tables in the specified catalog and schema
 func (c *Client) ListTables(catalog, schema string) ([]string, error) {
+	return c.ListTablesWithContext(context.Background(), catalog, schema)
+}
+
+// ListTablesWithContext returns a list of tables in the specified catalog and schema with context
+func (c *Client) ListTablesWithContext(ctx context.Context, catalog, schema string) ([]string, error) {
 	if catalog == "" {
 		catalog = c.config.Catalog
 	}
@@ -412,7 +427,7 @@ func (c *Client) ListTables(catalog, schema string) ([]string, error) {
 	}
 
 	query := fmt.Sprintf("SHOW TABLES FROM %s.%s", catalog, schema)
-	results, err := c.ExecuteQuery(query)
+	results, err := c.ExecuteQueryWithContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -434,6 +449,11 @@ func (c *Client) ListTables(catalog, schema string) ([]string, error) {
 
 // GetTableSchema returns the schema of a table
 func (c *Client) GetTableSchema(catalog, schema, table string) ([]map[string]interface{}, error) {
+	return c.GetTableSchemaWithContext(context.Background(), catalog, schema, table)
+}
+
+// GetTableSchemaWithContext returns the schema of a table with context
+func (c *Client) GetTableSchemaWithContext(ctx context.Context, catalog, schema, table string) ([]map[string]interface{}, error) {
 	// Resolve catalog/schema/table parameters first
 	parts := strings.Split(table, ".")
 	if len(parts) == 3 {
@@ -467,11 +487,16 @@ func (c *Client) GetTableSchema(catalog, schema, table string) ([]map[string]int
 
 	// Build and execute query with resolved parameters
 	query := fmt.Sprintf("DESCRIBE %s.%s.%s", catalog, schema, table)
-	return c.ExecuteQuery(query)
+	return c.ExecuteQueryWithContext(ctx, query)
 }
 
 // ExplainQuery returns the query execution plan for a given SQL query
 func (c *Client) ExplainQuery(query string, format string) ([]map[string]interface{}, error) {
+	return c.ExplainQueryWithContext(context.Background(), query, format)
+}
+
+// ExplainQueryWithContext returns the query execution plan for a given SQL query with context
+func (c *Client) ExplainQueryWithContext(ctx context.Context, query string, format string) ([]map[string]interface{}, error) {
 	// Build EXPLAIN query with optional TYPE format (LOGICAL|DISTRIBUTED|VALIDATE|IO)
 	explainQuery := "EXPLAIN"
 	if f := strings.ToUpper(strings.TrimSpace(format)); f != "" {
@@ -484,7 +509,7 @@ func (c *Client) ExplainQuery(query string, format string) ([]map[string]interfa
 	}
 	explainQuery = fmt.Sprintf("%s %s", explainQuery, query)
 
-	return c.ExecuteQuery(explainQuery)
+	return c.ExecuteQueryWithContext(ctx, explainQuery)
 }
 
 // sanitizeConnectionError removes sensitive information from connection errors

@@ -90,8 +90,11 @@ func (h *TrinoHandlers) ExecuteQuery(ctx context.Context, request mcp.CallToolRe
 
 // ListCatalogs handles catalog listing
 func (h *TrinoHandlers) ListCatalogs(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if h.Config.EnableImpersonation {
+		ctx = h.prepareImpersonationContext(ctx)
+	}
 
-	catalogs, err := h.TrinoClient.ListCatalogs()
+	catalogs, err := h.TrinoClient.ListCatalogsWithContext(ctx)
 	if err != nil {
 		log.Printf("Error listing catalogs: %v", err)
 		mcpErr := fmt.Errorf("failed to list catalogs: %w", err)
@@ -110,6 +113,9 @@ func (h *TrinoHandlers) ListCatalogs(ctx context.Context, request mcp.CallToolRe
 
 // ListSchemas handles schema listing
 func (h *TrinoHandlers) ListSchemas(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if h.Config.EnableImpersonation {
+		ctx = h.prepareImpersonationContext(ctx)
+	}
 
 	// Type assert Arguments to map[string]interface{}
 	args, ok := request.Params.Arguments.(map[string]interface{})
@@ -124,7 +130,7 @@ func (h *TrinoHandlers) ListSchemas(ctx context.Context, request mcp.CallToolReq
 		catalog = catalogParam
 	}
 
-	schemas, err := h.TrinoClient.ListSchemas(catalog)
+	schemas, err := h.TrinoClient.ListSchemasWithContext(ctx, catalog)
 	if err != nil {
 		log.Printf("Error listing schemas: %v", err)
 		mcpErr := fmt.Errorf("failed to list schemas: %w", err)
@@ -143,6 +149,9 @@ func (h *TrinoHandlers) ListSchemas(ctx context.Context, request mcp.CallToolReq
 
 // ListTables handles table listing
 func (h *TrinoHandlers) ListTables(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if h.Config.EnableImpersonation {
+		ctx = h.prepareImpersonationContext(ctx)
+	}
 
 	// Type assert Arguments to map[string]interface{}
 	args, ok := request.Params.Arguments.(map[string]interface{})
@@ -160,7 +169,7 @@ func (h *TrinoHandlers) ListTables(ctx context.Context, request mcp.CallToolRequ
 		schema = schemaParam
 	}
 
-	tables, err := h.TrinoClient.ListTables(catalog, schema)
+	tables, err := h.TrinoClient.ListTablesWithContext(ctx, catalog, schema)
 	if err != nil {
 		log.Printf("Error listing tables: %v", err)
 		mcpErr := fmt.Errorf("failed to list tables: %w", err)
@@ -179,6 +188,9 @@ func (h *TrinoHandlers) ListTables(ctx context.Context, request mcp.CallToolRequ
 
 // GetTableSchema handles table schema retrieval
 func (h *TrinoHandlers) GetTableSchema(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if h.Config.EnableImpersonation {
+		ctx = h.prepareImpersonationContext(ctx)
+	}
 
 	// Type assert Arguments to map[string]interface{}
 	args, ok := request.Params.Arguments.(map[string]interface{})
@@ -206,7 +218,7 @@ func (h *TrinoHandlers) GetTableSchema(ctx context.Context, request mcp.CallTool
 	}
 	table = tableParam
 
-	tableSchema, err := h.TrinoClient.GetTableSchema(catalog, schema, table)
+	tableSchema, err := h.TrinoClient.GetTableSchemaWithContext(ctx, catalog, schema, table)
 	if err != nil {
 		log.Printf("Error getting table schema: %v", err)
 		mcpErr := fmt.Errorf("failed to get table schema: %w", err)
@@ -225,6 +237,9 @@ func (h *TrinoHandlers) GetTableSchema(ctx context.Context, request mcp.CallTool
 
 // ExplainQuery handles query plan analysis
 func (h *TrinoHandlers) ExplainQuery(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if h.Config.EnableImpersonation {
+		ctx = h.prepareImpersonationContext(ctx)
+	}
 
 	// Type assert Arguments to map[string]interface{}
 	args, ok := request.Params.Arguments.(map[string]interface{})
@@ -247,7 +262,7 @@ func (h *TrinoHandlers) ExplainQuery(ctx context.Context, request mcp.CallToolRe
 	}
 
 	// Execute the explain query
-	results, err := h.TrinoClient.ExplainQuery(query, format)
+	results, err := h.TrinoClient.ExplainQueryWithContext(ctx, query, format)
 	if err != nil {
 		log.Printf("Error explaining query: %v", err)
 		mcpErr := fmt.Errorf("query explanation failed: %w", err)
