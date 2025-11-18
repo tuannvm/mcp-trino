@@ -43,8 +43,9 @@ func (h *TrinoHandlers) prepareImpersonationContext(ctx context.Context) context
 		}
 
 		if principal != "" {
-			log.Printf("MCP: Preparing impersonation context for %s: %s", h.Config.ImpersonationField, principal)
 			return trino.WithImpersonatedUser(ctx, principal)
+		} else {
+			log.Printf("Warning: Impersonation enabled but %s field is empty for user", h.Config.ImpersonationField)
 		}
 	}
 	return ctx

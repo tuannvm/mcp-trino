@@ -291,13 +291,6 @@ func (c *Client) ExecuteQueryWithContext(ctx context.Context, query string) ([]m
 	queryCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	// Log impersonation if enabled
-	if c.config.EnableImpersonation {
-		if user, ok := GetImpersonatedUser(queryCtx); ok {
-			log.Printf("Trino: Executing query with impersonated user: %s", user)
-		}
-	}
-
 	// Execute the query
 	rows, err := c.db.QueryContext(queryCtx, query)
 	if err != nil {
