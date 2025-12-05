@@ -170,10 +170,10 @@ func (c *Client) ensureConnected(ctx context.Context) (*sql.DB, error) {
 	c.mu.Unlock()
 
 	// Get token via external auth flow
-	// Uses BOTH the caller's context deadline AND the internal auth timeout
-	// (TRINO_EXTERNAL_AUTH_TIMEOUT). Whichever expires first will abort auth.
-	// Note: Retry after 401 uses context.Background() to give re-auth full timeout.
-	token, err := c.authenticator.GetToken(ctx)
+	// Use context.Background() to give auth full TRINO_EXTERNAL_AUTH_TIMEOUT duration.
+	// The caller's query timeout shouldn't constrain the one-time browser auth flow,
+	// which can take minutes for the user to complete SSO login.
+	token, err := c.authenticator.GetToken(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("external authentication failed: %w", err)
 	}
