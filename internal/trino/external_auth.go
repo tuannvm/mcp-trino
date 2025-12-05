@@ -45,13 +45,17 @@ func NewExternalAuthenticator(baseURL, username string, timeoutSecs int) *Extern
 // GetToken retrieves a valid OAuth token, using cache if available
 func (a *ExternalAuthenticator) GetToken(ctx context.Context) (string, error) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 
 	// Check if we have a valid cached token
 	if a.tokenCache != nil && time.Now().Before(a.tokenCache.expiresAt) {
+		token := a.tokenCache.token
+		a.mu.Unlock()
 		log.Println("INFO: Using cached OAuth token")
-		return a.tokenCache.token, nil
+		return token, nil
 	}
+
+	// Release lock during long-running auth flow to allow other operations
+	a.mu.Unlock()
 
 	log.Println("INFO: No valid cached token, initiating external authentication flow")
 
@@ -74,6 +78,15 @@ func (a *ExternalAuthenticator) GetToken(ctx context.Context) (string, error) {
 	token, err := a.pollForToken(ctx, tokenURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to get token: %w", err)
+	}
+
+	// Re-acquire lock to update cache
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// Double-check: another goroutine might have completed auth while we were waiting
+	if a.tokenCache != nil && time.Now().Before(a.tokenCache.expiresAt) {
+		return a.tokenCache.token, nil
 	}
 
 	// Cache the token (assume 1 hour TTL if not specified)
@@ -160,14 +173,26 @@ func parseAuthHeader(header string) (redirectURL, tokenURL string) {
 // pollForToken polls the token URL until authentication is complete
 func (a *ExternalAuthenticator) pollForToken(ctx context.Context, tokenURL string) (string, error) {
 	pollInterval := 5 * time.Second
-	deadline := time.Now().Add(a.timeout)
+
+	// Try immediately first (user may have already completed auth)
+	token, err := a.tryGetToken(ctx, tokenURL)
+	if err == nil && token != "" {
+		return token, nil
+	}
+
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
-	for time.Now().Before(deadline) {
+	// Use timer for precise timeout instead of loop condition check
+	timer := time.NewTimer(a.timeout)
+	defer timer.Stop()
+
+	for {
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
+		case <-timer.C:
+			return "", fmt.Errorf("authentication timeout: user did not complete authentication within %v", a.timeout)
 		case <-ticker.C:
 			token, err := a.tryGetToken(ctx, tokenURL)
 			if err == nil && token != "" {
@@ -176,8 +201,6 @@ func (a *ExternalAuthenticator) pollForToken(ctx context.Context, tokenURL strin
 			// Continue polling on error or empty token
 		}
 	}
-
-	return "", fmt.Errorf("authentication timeout: user did not complete authentication within %v", a.timeout)
 }
 
 // tryGetToken attempts to retrieve the token from the token URL
