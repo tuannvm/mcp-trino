@@ -203,6 +203,82 @@ func TestValidateAllowlist(t *testing.T) {
 	}
 }
 
+func TestExternalAuthConfiguration(t *testing.T) {
+	// Save original environment
+	originalExtAuth := os.Getenv("TRINO_EXTERNAL_AUTH")
+	originalExtAuthTimeout := os.Getenv("TRINO_EXTERNAL_AUTH_TIMEOUT")
+	originalOAuth := os.Getenv("OAUTH_ENABLED")
+
+	// Clean up after test
+	defer func() {
+		os.Setenv("TRINO_EXTERNAL_AUTH", originalExtAuth)
+		os.Setenv("TRINO_EXTERNAL_AUTH_TIMEOUT", originalExtAuthTimeout)
+		os.Setenv("OAUTH_ENABLED", originalOAuth)
+	}()
+
+	tests := []struct {
+		name            string
+		extAuth         string
+		extAuthTimeout  string
+		wantExtAuth     bool
+		wantTimeout     int
+	}{
+		{
+			name:        "External auth disabled by default",
+			extAuth:     "",
+			wantExtAuth: false,
+			wantTimeout: 300,
+		},
+		{
+			name:        "External auth enabled",
+			extAuth:     "true",
+			wantExtAuth: true,
+			wantTimeout: 300,
+		},
+		{
+			name:           "Custom timeout",
+			extAuth:        "true",
+			extAuthTimeout: "600",
+			wantExtAuth:    true,
+			wantTimeout:    600,
+		},
+		{
+			name:           "Invalid timeout uses default",
+			extAuth:        "true",
+			extAuthTimeout: "invalid",
+			wantExtAuth:    true,
+			wantTimeout:    300,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			os.Unsetenv("TRINO_EXTERNAL_AUTH")
+			os.Unsetenv("TRINO_EXTERNAL_AUTH_TIMEOUT")
+			os.Setenv("OAUTH_ENABLED", "false")
+
+			if tt.extAuth != "" {
+				os.Setenv("TRINO_EXTERNAL_AUTH", tt.extAuth)
+			}
+			if tt.extAuthTimeout != "" {
+				os.Setenv("TRINO_EXTERNAL_AUTH_TIMEOUT", tt.extAuthTimeout)
+			}
+
+			config, err := NewTrinoConfig()
+			if err != nil {
+				t.Fatalf("NewTrinoConfig() error = %v", err)
+			}
+
+			if config.ExternalAuth != tt.wantExtAuth {
+				t.Errorf("ExternalAuth = %v, want %v", config.ExternalAuth, tt.wantExtAuth)
+			}
+			if config.ExternalAuthTimeout != tt.wantTimeout {
+				t.Errorf("ExternalAuthTimeout = %v, want %v", config.ExternalAuthTimeout, tt.wantTimeout)
+			}
+		})
+	}
+}
+
 func TestNewTrinoConfigMalformedAllowlist(t *testing.T) {
 	// Save original environment
 	originalSchemas := os.Getenv("TRINO_ALLOWED_SCHEMAS")

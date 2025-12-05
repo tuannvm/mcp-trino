@@ -40,13 +40,17 @@ func main() {
 		}
 	}()
 
-	// Test connection by listing catalogs
-	log.Println("Testing Trino connection...")
-	catalogs, err := trinoClient.ListCatalogs()
-	if err != nil {
-		log.Fatalf("Failed to connect to Trino: %v", err)
+	// Test connection by listing catalogs (skip for external auth - lazy connection)
+	if !trinoConfig.ExternalAuth {
+		log.Println("Testing Trino connection...")
+		catalogs, err := trinoClient.ListCatalogs()
+		if err != nil {
+			log.Fatalf("Failed to connect to Trino: %v", err)
+		}
+		log.Printf("Connected to Trino server. Available catalogs: %s", strings.Join(catalogs, ", "))
+	} else {
+		log.Println("External auth enabled - connection will be established on first query")
 	}
-	log.Printf("Connected to Trino server. Available catalogs: %s", strings.Join(catalogs, ", "))
 
 	// Create MCP server
 	log.Println("Initializing MCP server...")

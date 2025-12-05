@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/trinodb/trino-go-client/trino"
@@ -48,44 +49,83 @@ func (t *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 
 // Client is a wrapper around Trino client
 type Client struct {
-	db      *sql.DB
-	config  *config.TrinoConfig
-	timeout time.Duration
+	db            *sql.DB
+	config        *config.TrinoConfig
+	timeout       time.Duration
+	authenticator *ExternalAuthenticator
+	initialized   bool
+	mu            sync.Mutex // Protects concurrent access to connection state
+	httpClient    *http.Client
 }
 
 // NewClient creates a new Trino client
 func NewClient(cfg *config.TrinoConfig) (*Client, error) {
-	dsnURL := url.URL{
-		Scheme: cfg.Scheme,
-		User:   url.UserPassword(cfg.User, cfg.Password),
-		Host:   fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-	}
-
-	params := url.Values{}
-	params.Add("catalog", cfg.Catalog)
-	params.Add("schema", cfg.Schema)
-	params.Add("SSL", fmt.Sprintf("%t", cfg.SSL))
-	params.Add("SSLInsecure", fmt.Sprintf("%t", cfg.SSLInsecure))
-	params.Add("custom_client", "mcp-trino")
-
-	dsnURL.RawQuery = params.Encode()
-	dsn := dsnURL.String()
-
+	// Create HTTP client with custom headers (created once, reused for all connections)
 	httpClient := &http.Client{
 		Transport: &headerRoundTripper{
 			base:   http.DefaultTransport,
 			config: cfg,
 		},
 	}
+
+	// Register custom client once globally
 	if err := trino.RegisterCustomClient("mcp-trino", httpClient); err != nil {
-		return nil, fmt.Errorf("failed to register custom HTTP client: %w", err)
+		// Ignore "already registered" errors (process reuse, tests)
+		if !strings.Contains(err.Error(), "already registered") {
+			return nil, fmt.Errorf("failed to register custom HTTP client: %w", err)
+		}
 	}
+
+	client := &Client{
+		config:     cfg,
+		timeout:    cfg.QueryTimeout,
+		httpClient: httpClient,
+	}
+
+	// If external auth is enabled, defer connection until first query (lazy auth)
+	if cfg.ExternalAuth {
+		baseURL := fmt.Sprintf("%s://%s:%d", cfg.Scheme, cfg.Host, cfg.Port)
+		client.authenticator = NewExternalAuthenticator(baseURL, cfg.User, cfg.ExternalAuthTimeout)
+		log.Println("INFO: External authentication enabled - connection will be established on first query")
+		return client, nil
+	}
+
+	// Standard connection flow
+	if err := client.connect(""); err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+// connect establishes the database connection, optionally with an access token
+func (c *Client) connect(accessToken string) error {
+	dsnURL := url.URL{
+		Scheme: c.config.Scheme,
+		User:   url.UserPassword(c.config.User, c.config.Password),
+		Host:   fmt.Sprintf("%s:%d", c.config.Host, c.config.Port),
+	}
+
+	params := url.Values{}
+	params.Add("catalog", c.config.Catalog)
+	params.Add("schema", c.config.Schema)
+	params.Add("SSL", fmt.Sprintf("%t", c.config.SSL))
+	params.Add("SSLInsecure", fmt.Sprintf("%t", c.config.SSLInsecure))
+	params.Add("custom_client", "mcp-trino")
+
+	// Add access token if provided (for external auth)
+	if accessToken != "" {
+		params.Add("accessToken", accessToken)
+	}
+
+	dsnURL.RawQuery = params.Encode()
+	dsn := dsnURL.String()
 
 	db, err := sql.Open("trino", dsn)
 	if err != nil {
 		// Sanitize error to prevent password exposure
-		sanitizedErr := sanitizeConnectionError(err, cfg.Password)
-		return nil, fmt.Errorf("failed to connect to Trino: %w", sanitizedErr)
+		sanitizedErr := sanitizeConnectionError(err, c.config.Password)
+		return fmt.Errorf("failed to connect to Trino: %w", sanitizedErr)
 	}
 
 	// Set connection pool parameters
@@ -100,20 +140,77 @@ func NewClient(cfg *config.TrinoConfig) (*Client, error) {
 			log.Printf("Error closing DB connection: %v", closeErr)
 		}
 		// Sanitize error to prevent password exposure
-		sanitizedErr := sanitizeConnectionError(err, cfg.Password)
-		return nil, fmt.Errorf("failed to ping Trino: %w", sanitizedErr)
+		sanitizedErr := sanitizeConnectionError(err, c.config.Password)
+		return fmt.Errorf("failed to ping Trino: %w", sanitizedErr)
 	}
 
-	return &Client{
-		db:      db,
-		config:  cfg,
-		timeout: cfg.QueryTimeout,
-	}, nil
+	c.db = db
+	c.initialized = true
+	return nil
+}
+
+// ensureConnected establishes connection if needed and returns the db handle.
+// Always acquires lock to prevent returning a connection being closed by another goroutine.
+func (c *Client) ensureConnected(ctx context.Context) (*sql.DB, error) {
+	c.mu.Lock()
+
+	// Check if already connected
+	if c.initialized && c.db != nil {
+		db := c.db
+		c.mu.Unlock()
+		return db, nil
+	}
+
+	if c.authenticator == nil {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("client not initialized and no authenticator available")
+	}
+
+	// Release lock during potentially long-running auth to allow other operations (e.g. Close)
+	c.mu.Unlock()
+
+	// Get token via external auth flow
+	// Uses BOTH the caller's context deadline AND the internal auth timeout
+	// (TRINO_EXTERNAL_AUTH_TIMEOUT). Whichever expires first will abort auth.
+	// Note: Retry after 401 uses context.Background() to give re-auth full timeout.
+	token, err := c.authenticator.GetToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("external authentication failed: %w", err)
+	}
+
+	// Re-acquire lock to update state
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Double-check state (another goroutine might have connected while we were authenticating)
+	if c.initialized && c.db != nil {
+		return c.db, nil
+	}
+
+	// Connect with the token
+	if err := c.connect(token); err != nil {
+		// If connection fails due to auth, invalidate token for retry
+		if IsAuthenticationError(err) {
+			c.authenticator.InvalidateToken()
+		}
+		return nil, err
+	}
+
+	return c.db, nil
 }
 
 // Close closes the database connection
 func (c *Client) Close() error {
-	return c.db.Close()
+	c.mu.Lock()
+	db := c.db
+	c.db = nil // Prevent double-close from clearConnectionForReauth()
+	c.initialized = false
+	c.mu.Unlock()
+
+	if db == nil {
+		return nil
+	}
+	return db.Close()
 }
 
 // WithImpersonatedUser adds impersonated user to context
@@ -278,6 +375,19 @@ func (c *Client) ExecuteQuery(query string) ([]map[string]interface{}, error) {
 
 // ExecuteQueryWithContext executes a SQL query and returns the results
 func (c *Client) ExecuteQueryWithContext(ctx context.Context, query string) ([]map[string]interface{}, error) {
+	return c.executeQueryWithRetry(ctx, query, false)
+}
+
+// executeQueryWithRetry handles query execution with automatic re-authentication on 401 errors
+func (c *Client) executeQueryWithRetry(ctx context.Context, query string, isRetry bool) ([]map[string]interface{}, error) {
+	// Ensure connection is established (triggers auth if needed)
+	// Note: Capturing db prevents nil deref but not concurrent closure by clearConnectionForReauth().
+	// If another goroutine closes the connection during re-auth, this query will fail and retry.
+	db, err := c.ensureConnected(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	// Strip trailing semicolon that Trino doesn't allow
 	query = strings.TrimSuffix(strings.TrimSpace(query), ";")
 
@@ -291,9 +401,20 @@ func (c *Client) ExecuteQueryWithContext(ctx context.Context, query string) ([]m
 	queryCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	// Execute the query
-	rows, err := c.db.QueryContext(queryCtx, query)
+	// Execute the query using captured db handle
+	rows, err := db.QueryContext(queryCtx, query)
 	if err != nil {
+		// Check for authentication errors - attempt automatic re-authentication
+		if !isRetry && IsAuthenticationError(err) && c.authenticator != nil {
+			log.Printf("WARNING: Authentication failed (401) - attempting automatic re-authentication...")
+			c.clearConnectionForReauth()
+			// Use fresh context for retry to reset deadline, but preserve impersonation
+			retryCtx := context.Background()
+			if user, ok := GetImpersonatedUser(ctx); ok {
+				retryCtx = WithImpersonatedUser(retryCtx, user)
+			}
+			return c.executeQueryWithRetry(retryCtx, query, true)
+		}
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}
 	defer func() {
@@ -340,10 +461,36 @@ func (c *Client) ExecuteQueryWithContext(ctx context.Context, query string) ([]m
 
 	// Check for errors after iterating
 	if err := rows.Err(); err != nil {
+		// Check for auth errors during result processing
+		if !isRetry && IsAuthenticationError(err) && c.authenticator != nil {
+			log.Printf("WARNING: Authentication failed during result processing - attempting re-auth...")
+			c.clearConnectionForReauth()
+			// Use fresh context for retry to reset deadline, but preserve impersonation
+			retryCtx := context.Background()
+			if user, ok := GetImpersonatedUser(ctx); ok {
+				retryCtx = WithImpersonatedUser(retryCtx, user)
+			}
+			return c.executeQueryWithRetry(retryCtx, query, true)
+		}
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
 
 	return results, nil
+}
+
+// clearConnectionForReauth clears the connection state to allow re-authentication
+func (c *Client) clearConnectionForReauth() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.authenticator != nil {
+		c.authenticator.InvalidateToken()
+	}
+	if c.db != nil {
+		c.db.Close()
+		c.db = nil
+	}
+	c.initialized = false
 }
 
 // ListCatalogs returns a list of available catalogs
