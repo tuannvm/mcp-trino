@@ -55,6 +55,30 @@ Authorization: Bearer <your-jwt-token>
 
 For detailed OAuth configuration, deployment examples, and browser-based MCP client compatibility lessons learned, see [oauth.md](oauth.md).
 
+## Trino External Authentication
+
+For Trino clusters that use browser-based SSO (Okta, Azure AD, etc.) via Trino's native external authentication, enable this flow instead of configuring MCP-level OAuth:
+
+```bash
+export TRINO_EXTERNAL_AUTH=true
+export TRINO_EXTERNAL_AUTH_TIMEOUT=300  # seconds for user to complete login
+```
+
+**How it works:**
+1. On first query, mcp-trino makes an unauthenticated request to Trino
+2. Trino returns a 401 with `WWW-Authenticate` header containing OAuth URLs
+3. Browser opens automatically for user to complete SSO login
+4. mcp-trino polls for the token and caches it (1-hour TTL)
+5. Subsequent queries use the cached token
+6. On token expiry (401 error), re-authentication is triggered automatically
+
+**When to use:**
+- Your Trino cluster requires browser-based SSO
+- You want to use your own identity (not a service account)
+- Local/desktop usage where browser access is available
+
+**Note:** This is different from MCP OAuth (`OAUTH_ENABLED`). MCP OAuth secures the MCP server itself, while Trino external auth authenticates with the Trino cluster.
+
 ## HTTPS Support
 
 For production deployments with authentication, HTTPS is strongly recommended:
@@ -238,6 +262,8 @@ mcp-trino
 | TRINO_SSL_INSECURE     | Allow insecure SSL                | true      |
 | TRINO_ALLOW_WRITE_QUERIES | Allow non-read-only SQL queries | false     |
 | TRINO_QUERY_TIMEOUT    | Query timeout in seconds          | 30        |
+| TRINO_EXTERNAL_AUTH    | Enable Trino browser-based SSO    | false     |
+| TRINO_EXTERNAL_AUTH_TIMEOUT | Seconds for browser login     | 300       |
 | MCP_TRANSPORT          | Transport method (stdio/http)     | stdio     |
 | MCP_PORT               | HTTP port for http transport      | 8080      |
 | MCP_HOST               | Host for HTTP callbacks           | localhost |

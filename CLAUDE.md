@@ -111,6 +111,10 @@ All tools return JSON-formatted responses and handle parameter validation:
 - `TRINO_ALLOW_WRITE_QUERIES` (default: false for security)
 - `TRINO_QUERY_TIMEOUT` (default: 30 seconds, validated > 0)
 
+**Trino External Authentication** (for clusters with browser-based SSO):
+- `TRINO_EXTERNAL_AUTH` (default: false) - Enable Trino's native browser OAuth flow
+- `TRINO_EXTERNAL_AUTH_TIMEOUT` (default: 300) - Seconds for user to complete browser login
+
 **MCP Server:**
 - `MCP_TRANSPORT` (stdio/http), `MCP_PORT` (default: 8080), `MCP_HOST`
 

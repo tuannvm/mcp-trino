@@ -102,6 +102,7 @@ graph TB
 - ✅ Backward compatibility with SSE endpoints
 - ✅ Compatible with Cursor, Claude Desktop, Windsurf, ChatWise, and any MCP-compatible clients.
 - ✅ User Impersonation for authenticated users via Trino's `X-Trino-User` header
+- ✅ Trino External Authentication (browser-based SSO) for clusters with native OAuth
 
 ## Installation & Quick Start
 
@@ -168,6 +169,18 @@ export TRINO_IMPERSONATION_FIELD=email  # Options: username, email, subject
 
 # MCP will execute queries as the authenticated OAuth user via X-Trino-User header
 ```
+
+**Trino External Authentication:**
+
+For Trino clusters with browser-based SSO (Okta, Azure AD, etc.), use Trino's native external authentication instead of MCP OAuth:
+
+```bash
+# Enable Trino's browser OAuth flow
+export TRINO_EXTERNAL_AUTH=true
+export TRINO_EXTERNAL_AUTH_TIMEOUT=300  # seconds for user to complete login (default: 300)
+```
+
+On first query, opens browser for SSO login, then caches the token for subsequent queries. Automatically re-authenticates on token expiry.
 
 For complete configuration, see [Deployment Guide](docs/deployment.md), [OAuth Guide](docs/oauth.md), [Allowlists Guide](docs/allowlists.md), and [Impersonation Guide](docs/impersonation.md).
 
