@@ -83,7 +83,7 @@ func NewClient(cfg *config.TrinoConfig) (*Client, error) {
 	// If external auth is enabled, defer connection until first query (lazy auth)
 	if cfg.ExternalAuth {
 		baseURL := fmt.Sprintf("%s://%s:%d", cfg.Scheme, cfg.Host, cfg.Port)
-		client.authenticator = NewExternalAuthenticator(baseURL, cfg.User, cfg.ExternalAuthTimeout)
+		client.authenticator = NewExternalAuthenticator(baseURL, cfg.User, cfg.ExternalAuthTimeout, cfg.SSLInsecure)
 		log.Println("INFO: External authentication enabled - connection will be established on first query")
 		return client, nil
 	}

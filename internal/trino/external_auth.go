@@ -2,6 +2,7 @@ package trino
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,11 +34,17 @@ type tokenCache struct {
 }
 
 // NewExternalAuthenticator creates a new external authenticator
-func NewExternalAuthenticator(baseURL, username string, timeoutSecs int) *ExternalAuthenticator {
+func NewExternalAuthenticator(baseURL, username string, timeoutSecs int, sslInsecure bool) *ExternalAuthenticator {
+	// Create HTTP client with TLS config matching the main Trino connection
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: sslInsecure, //nolint:gosec // User-configurable for self-signed certs
+		},
+	}
 	return &ExternalAuthenticator{
 		baseURL:    baseURL,
 		username:   username,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{Timeout: 30 * time.Second, Transport: transport},
 		timeout:    time.Duration(timeoutSecs) * time.Second,
 	}
 }

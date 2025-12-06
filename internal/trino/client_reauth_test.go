@@ -24,6 +24,7 @@ func TestClearConnectionForReauth(t *testing.T) {
 			"http://localhost:8080",
 			"testuser",
 			300,
+			false,
 		),
 	}
 
@@ -120,6 +121,7 @@ func TestConcurrentCloseAndClear(t *testing.T) {
 				"http://localhost:8080",
 				"testuser",
 				300,
+				false,
 			),
 		}
 		client.authenticator.tokenCache = &tokenCache{token: "test"}
@@ -163,6 +165,7 @@ func TestConcurrentMultipleCloses(t *testing.T) {
 			"http://localhost:8080",
 			"testuser",
 			300,
+			false,
 		),
 	}
 

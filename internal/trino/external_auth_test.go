@@ -129,7 +129,7 @@ func TestIsAuthenticationError(t *testing.T) {
 }
 
 func TestInvalidateToken(t *testing.T) {
-	auth := NewExternalAuthenticator("https://trino.example.com", "testuser", 300)
+	auth := NewExternalAuthenticator("https://trino.example.com", "testuser", 300, false)
 
 	// Manually set a cached token
 	auth.tokenCache = &tokenCache{
@@ -152,7 +152,7 @@ func TestInvalidateToken(t *testing.T) {
 }
 
 func TestTokenCaching(t *testing.T) {
-	auth := NewExternalAuthenticator("https://trino.example.com", "testuser", 300)
+	auth := NewExternalAuthenticator("https://trino.example.com", "testuser", 300, false)
 
 	// No token should be cached initially
 	if auth.tokenCache != nil {
@@ -185,7 +185,7 @@ func TestTokenCaching(t *testing.T) {
 // TestConcurrentGetTokenWithCache verifies thread-safety of GetToken with cached tokens.
 // Run with -race to detect data races.
 func TestConcurrentGetTokenWithCache(t *testing.T) {
-	auth := NewExternalAuthenticator("https://trino.example.com", "testuser", 300)
+	auth := NewExternalAuthenticator("https://trino.example.com", "testuser", 300, false)
 
 	// Pre-populate cache so GetToken returns immediately without network calls
 	auth.tokenCache = &tokenCache{
@@ -232,7 +232,7 @@ func TestConcurrentGetTokenWithCache(t *testing.T) {
 // TestConcurrentInvalidateAndGetToken verifies no race between InvalidateToken and GetToken.
 // Run with -race to detect data races.
 func TestConcurrentInvalidateAndGetToken(t *testing.T) {
-	auth := NewExternalAuthenticator("https://trino.example.com", "testuser", 300)
+	auth := NewExternalAuthenticator("https://trino.example.com", "testuser", 300, false)
 
 	// Pre-populate cache
 	auth.tokenCache = &tokenCache{
