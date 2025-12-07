@@ -63,7 +63,7 @@ healthCheck:
   enabled: true
   livenessProbe:
     httpGet:
-      path: /
+      path: /status
       port: http
     initialDelaySeconds: 10
     periodSeconds: 5
@@ -71,7 +71,7 @@ healthCheck:
     failureThreshold: 3
   readinessProbe:
     httpGet:
-      path: /
+      path: /status
       port: http
     initialDelaySeconds: 2
     periodSeconds: 3

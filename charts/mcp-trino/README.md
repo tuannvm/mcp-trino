@@ -6,6 +6,8 @@ A Helm chart for deploying mcp-trino as a remote MCP server on Kubernetes, speci
 
 mcp-trino is a Model Context Protocol (MCP) server that enables AI assistants to interact with Trino's distributed SQL query engine. This Helm chart provides a production-ready deployment solution with comprehensive security, scalability, and AWS integration features.
 
+**OAuth Authentication**: mcp-trino uses [oauth-mcp-proxy](https://github.com/tuannvm/oauth-mcp-proxy) for OAuth 2.1 authentication. See the [oauth-mcp-proxy documentation](https://github.com/tuannvm/oauth-mcp-proxy#readme) for detailed provider setup and security best practices.
+
 ## Prerequisites
 
 - Kubernetes 1.19+

@@ -1,6 +1,10 @@
 # JWT Authentication Implementation
 
-This document describes the JWT-based authentication implementation for the mcp-trino server, providing secure access control at the server level.
+> **Implementation:** JWT authentication is provided by [oauth-mcp-proxy](https://github.com/tuannvm/oauth-mcp-proxy).
+>
+> **For JWT configuration, validation logic, and security details**, see the [oauth-mcp-proxy documentation](https://github.com/tuannvm/oauth-mcp-proxy#readme).
+
+This document describes the JWT-based authentication architecture for mcp-trino server, providing secure access control at the server level.
 
 ## Overview
 
@@ -54,7 +58,8 @@ sequenceDiagram
 - **Signature Verification**: Proper HMAC-SHA256 signature validation
 - **Claims Validation**: Required claims checking (sub, exp, iat)
 - **Token Caching**: Performance optimization with secure secret caching
-- **No Insecure Defaults**: JWT_SECRET environment variable required
+- **Secure Token Logging**: JWT tokens logged as SHA256 hashes to prevent exposure
+- **Mandatory JWT_SECRET**: Server fails to start without JWT_SECRET in HMAC mode
 
 ## Configuration
 
@@ -62,8 +67,8 @@ sequenceDiagram
 
 ```bash
 # Authentication Configuration
-TRINO_OAUTH_ENABLED=true        # Enable JWT authentication
-JWT_SECRET=your-secret-key      # JWT signing secret (REQUIRED)
+OAUTH_ENABLED=true        # Default: true (secure by default)
+JWT_SECRET=your-secret-key      # JWT signing secret (REQUIRED - server fails without it)
 
 # Transport Configuration
 MCP_TRANSPORT=http              # Enable HTTP transport
@@ -142,6 +147,8 @@ The server supports both modern and legacy endpoints for backward compatibility:
 - **Debug Logging**: Comprehensive logging for troubleshooting
 
 ### Token Security
+- **Hash-Based Logging**: JWT tokens logged as SHA256 hashes to prevent sensitive data exposure
+- **Secret Enforcement**: Server startup blocked without proper JWT_SECRET configuration
 - **Secret Caching**: Efficient JWT secret management with sync.Once pattern
 - **Signature Verification**: Proper HMAC-SHA256 validation
 - **Claims Validation**: Required claims verification
@@ -181,6 +188,8 @@ If migrating from Server-Sent Events:
 ### Security Requirements
 - **HTTPS Required**: JWT authentication should always use HTTPS in production
 - **Strong Secrets**: Use cryptographically strong JWT secrets (minimum 256 bits)
+- **Mandatory Configuration**: JWT_SECRET required for HMAC mode (server fails without it)
+- **Secure Logging**: JWT tokens logged as hashes to prevent sensitive data exposure
 - **Token Expiration**: Implement appropriate token lifetimes
 - **Rate Limiting**: Consider adding rate limiting middleware
 - **Audit Logging**: Log authentication attempts and failures
@@ -202,9 +211,10 @@ If migrating from Server-Sent Events:
 ### Debug Information
 Enable detailed logging to see:
 - Token extraction from headers
-- JWT validation results
+- JWT validation results (tokens logged as secure hashes)
 - User authentication status
 - Request processing flow
+- SHA256 token hashes for debugging without exposing sensitive data
 
 ## Implementation Status
 

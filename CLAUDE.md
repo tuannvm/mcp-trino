@@ -9,10 +9,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Tech Stack
 
 - **Language:** Go 1.24.2+
-- **Key Dependencies:** 
-  - `github.com/mark3labs/mcp-go` v0.33.0 (MCP protocol)
-  - `github.com/trinodb/trino-go-client` v0.323.0 (Trino client)
-  - `github.com/golang-jwt/jwt/v5` v5.2.2 (JWT authentication)
+- **Key Dependencies:**
+  - `github.com/mark3labs/mcp-go` v0.41.1 (MCP protocol)
+  - `github.com/trinodb/trino-go-client` v0.328.0 (Trino client)
+  - `github.com/tuannvm/oauth-mcp-proxy` v0.0.2 (OAuth 2.1 authentication)
 - **Build Tools:** GoReleaser, Docker, GitHub Actions, golangci-lint
 
 ## Development Commands
@@ -65,12 +65,20 @@ go test ./internal/mcp       # Test MCP handlers package
    - Context-based timeout handling for queries
    - Query result processing and formatting
 
-4. **Handler Layer** (`internal/mcp/handlers.go`): 
+4. **Handler Layer** (`internal/mcp/handlers.go`):
    - MCP tool implementations with JSON response formatting
    - Parameter validation and error handling
    - Consistent logging for debugging
    - Tool result standardization
-   - OAuth middleware support for authenticated tools
+
+### OAuth Authentication Architecture
+
+OAuth 2.1 authentication is provided by the external **[oauth-mcp-proxy](https://github.com/tuannvm/oauth-mcp-proxy)** library:
+- **Integration Point**: `internal/mcp/server.go` - OAuth middleware registration
+- **Configuration**: `internal/config/config.go` - OAuth config gathering (validation delegated to library)
+- **Modes**: Native (client-driven) and Proxy (server-driven) OAuth flows
+- **Providers**: HMAC, Okta, Google, Azure AD
+- **Documentation**: See [docs/oauth.md](docs/oauth.md) and [oauth-mcp-proxy docs](https://github.com/tuannvm/oauth-mcp-proxy#readme)
 
 ### Transport Support
 
@@ -97,12 +105,22 @@ All tools return JSON-formatted responses and handle parameter validation:
 
 ## Configuration
 
-Environment variables for connection and security:
+**Trino Connection:**
 - `TRINO_HOST`, `TRINO_PORT`, `TRINO_USER`, `TRINO_PASSWORD`
 - `TRINO_SCHEME` (http/https), `TRINO_SSL`, `TRINO_SSL_INSECURE`
 - `TRINO_ALLOW_WRITE_QUERIES` (default: false for security)
 - `TRINO_QUERY_TIMEOUT` (default: 30 seconds, validated > 0)
+
+**MCP Server:**
 - `MCP_TRANSPORT` (stdio/http), `MCP_PORT` (default: 8080), `MCP_HOST`
+
+**OAuth (optional, via oauth-mcp-proxy):**
+- `OAUTH_ENABLED` (default: false) - Single source of truth for OAuth activation
+- `OAUTH_MODE` (native/proxy, default: native)
+- `OAUTH_PROVIDER` (hmac/okta/google/azure, default: hmac)
+- `JWT_SECRET` - Required for HMAC provider
+- `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` - For OIDC providers
+- `OAUTH_ALLOWED_REDIRECT_URIS` - Comma-separated redirect URIs
 
 Key defaults and behaviors:
 - HTTPS scheme forces SSL=true regardless of TRINO_SSL setting

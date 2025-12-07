@@ -60,14 +60,24 @@ trino:
   sslInsecure: false
   allowWriteQueries: false
   queryTimeout: 30
-  
+
+  # Allowlist configuration for performance optimization
+  allowlists:
+    # List of allowed catalogs (empty array means no filtering)
+    catalogs: []
+    # List of allowed schemas in catalog.schema format (empty array means no filtering)
+    schemas: []
+    # List of allowed tables in catalog.schema.table format (empty array means no filtering)
+    tables: []
+
   # OAuth 2.1 configuration
   oauth:
     enabled: false
+    mode: "native"  # native or proxy
     provider: "hmac"  # hmac, okta, google, azure
     jwtSecret: ""
-    redirectURI: ""
-    
+    redirectURIs: ""  # Single redirect URI or comma-separated list for proxy mode
+
     # OIDC configuration
     oidc:
       issuer: ""
@@ -115,7 +125,7 @@ healthCheck:
   enabled: true
   startupProbe:
     httpGet:
-      path: /
+      path: /status
       port: http
     initialDelaySeconds: 10
     periodSeconds: 10
@@ -123,7 +133,7 @@ healthCheck:
     failureThreshold: 6
   livenessProbe:
     httpGet:
-      path: /
+      path: /status
       port: http
     initialDelaySeconds: 30
     periodSeconds: 10
@@ -131,7 +141,7 @@ healthCheck:
     failureThreshold: 3
   readinessProbe:
     httpGet:
-      path: /
+      path: /status
       port: http
     initialDelaySeconds: 5
     periodSeconds: 5

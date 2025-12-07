@@ -18,11 +18,21 @@ data:
   MCP_TRANSPORT: {{ .Values.mcpServer.transport | quote }}
   MCP_HOST: {{ .Values.mcpServer.host | quote }}
   MCP_PORT: {{ .Values.mcpServer.port | quote }}
-  TRINO_OAUTH_ENABLED: {{ .Values.trino.oauth.enabled | quote }}
+  {{- if .Values.trino.allowlists.catalogs }}
+  TRINO_ALLOWED_CATALOGS: {{ .Values.trino.allowlists.catalogs | join "," | quote }}
+  {{- end }}
+  {{- if .Values.trino.allowlists.schemas }}
+  TRINO_ALLOWED_SCHEMAS: {{ .Values.trino.allowlists.schemas | join "," | quote }}
+  {{- end }}
+  {{- if .Values.trino.allowlists.tables }}
+  TRINO_ALLOWED_TABLES: {{ .Values.trino.allowlists.tables | join "," | quote }}
+  {{- end }}
+  OAUTH_ENABLED: {{ .Values.trino.oauth.enabled | quote }}
   {{- if .Values.trino.oauth.enabled }}
+  OAUTH_MODE: {{ .Values.trino.oauth.mode | quote }}
   OAUTH_PROVIDER: {{ .Values.trino.oauth.provider | quote }}
-  {{- if .Values.trino.oauth.redirectURI }}
-  OAUTH_REDIRECT_URI: {{ .Values.trino.oauth.redirectURI | quote }}
+  {{- if .Values.trino.oauth.redirectURIs }}
+  OAUTH_ALLOWED_REDIRECT_URIS: {{ .Values.trino.oauth.redirectURIs | quote }}
   {{- end }}
   {{- if .Values.trino.oauth.oidc.issuer }}
   OIDC_ISSUER: {{ .Values.trino.oauth.oidc.issuer | quote }}
@@ -32,5 +42,8 @@ data:
   {{- end }}
   {{- if .Values.trino.oauth.oidc.clientId }}
   OIDC_CLIENT_ID: {{ .Values.trino.oauth.oidc.clientId | quote }}
+  {{- end }}
+  {{- if .Values.trino.oauth.oidc.clientSecret }}
+  OIDC_CLIENT_SECRET: {{ .Values.trino.oauth.oidc.clientSecret| quote }}
   {{- end }}
   {{- end }}

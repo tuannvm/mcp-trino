@@ -2,6 +2,8 @@
 
 This guide provides step-by-step instructions for installing the mcp-trino Helm chart on Amazon EKS.
 
+> **OAuth Authentication**: mcp-trino uses [oauth-mcp-proxy](https://github.com/tuannvm/oauth-mcp-proxy) for OAuth 2.1 authentication. See the library documentation for detailed provider configuration and security best practices.
+
 ## Quick Start
 
 ### 1. Prerequisites
@@ -71,23 +73,68 @@ trino:
   schema: "analytics"
 ```
 
-### OAuth with Okta
+### OAuth with Okta - Fixed Redirect Mode (Development)
 
 ```yaml
-# values.yaml
+# values.yaml - Development with localhost support
 trino:
   oauth:
     enabled: true
+    mode: "proxy"
     provider: "okta"
+    jwtSecret: ""  # Generate with: openssl rand -hex 32
+    redirectURIs: "https://mcp-server.company.com/oauth/callback"  # Fixed mode
     oidc:
       issuer: "https://company.okta.com"
       audience: "trino-mcp"
       clientId: "mcp-client-id"
 
-# Install with secret
+# Install with secrets
 helm install mcp-trino ./charts/mcp-trino \
   -f values.yaml \
+  --set trino.oauth.jwtSecret="$(openssl rand -hex 32)" \
   --set trino.oauth.oidc.clientSecret="your-client-secret"
+```
+
+### OAuth with Okta - Allowlist Mode (Production)
+
+```yaml
+# values.yaml - Production with allowlist
+trino:
+  oauth:
+    enabled: true
+    mode: "proxy"
+    provider: "okta"
+    jwtSecret: ""  # Must be same across all pods
+    redirectURIs: "https://app1.company.com/callback,https://app2.company.com/callback"  # Allowlist mode
+    oidc:
+      issuer: "https://company.okta.com"
+      audience: "https://api.company.com"
+      clientId: "production-client-id"
+
+# Install with secrets
+helm install mcp-trino ./charts/mcp-trino \
+  -f values.yaml \
+  --set trino.oauth.jwtSecret="your-persistent-jwt-secret" \
+  --set trino.oauth.oidc.clientSecret="your-client-secret"
+```
+
+### OAuth Native Mode (Zero Server-Side Secrets)
+
+```yaml
+# values.yaml - Most secure, client handles OAuth
+trino:
+  oauth:
+    enabled: true
+    mode: "native"
+    provider: "okta"
+    oidc:
+      issuer: "https://company.okta.com"
+      audience: "https://mcp-server.com"
+      # No clientId or clientSecret needed
+
+# Install without secrets
+helm install mcp-trino ./charts/mcp-trino -f values.yaml
 ```
 
 ### EKS with Load Balancer
@@ -175,6 +222,26 @@ The chart implements security best practices:
 - Dropped capabilities
 - No privilege escalation
 
+### OAuth Security
+
+**Critical for Multi-Pod Deployments:**
+
+⚠️ **JWT_SECRET must be configured** when running multiple replicas to ensure state signing consistency:
+
+```bash
+# Generate secure JWT secret
+export JWT_SECRET=$(openssl rand -hex 32)
+
+helm install mcp-trino ./charts/mcp-trino \
+  --set trino.oauth.jwtSecret="$JWT_SECRET"
+```
+
+**Redirect URI Modes:**
+
+- **Fixed Mode** (single URI): Only accepts localhost callbacks (development)
+- **Allowlist Mode** (comma-separated): Exact match required (production)
+- See [OAuth Architecture](../../docs/oauth.md) for security details
+
 ### Network Policies
 
 Enable network policies for production:
@@ -200,6 +267,10 @@ extraEnvVarsSecret: "mcp-trino-secrets"
 # Or use sealed secrets
 trino:
   password: ""  # Leave empty, provide via sealed secret
+  oauth:
+    jwtSecret: ""  # Provide via sealed secret
+    oidc:
+      clientSecret: ""  # Provide via sealed secret
 ```
 
 ## Performance Tuning

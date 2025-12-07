@@ -20,4 +20,4 @@ spec:
         - --show-error
         - --max-time
         - "30"
-        - "http://{{ include "mcp-trino.fullname" . }}:{{ .Values.service.port }}/"
+        - "http://{{ include "mcp-trino.fullname" . }}:{{ .Values.service.port }}/status"

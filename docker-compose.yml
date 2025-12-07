@@ -22,15 +22,17 @@ services:
       dockerfile: Dockerfile
     container_name: trino-mcp
     ports:
-      - '8080:8080'
+      - '8081:8080'
     environment:
       - TRINO_HOST=trino
       - TRINO_PORT=8080
       - TRINO_USER=trino
       - TRINO_CATALOG=memory
       - TRINO_SCHEMA=default
+      - TRINO_SCHEME=http
       - MCP_TRANSPORT=http
       - MCP_PORT=8080
+      - TRINO_ALLOWED_SCHEMAS=memory.analytics,memory.marts,memory.staging
     depends_on:
       trino:
         condition: service_healthy
