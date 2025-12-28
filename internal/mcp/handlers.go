@@ -287,10 +287,10 @@ func (h *TrinoHandlers) ExplainQuery(ctx context.Context, request mcp.CallToolRe
 func RegisterTrinoTools(m *server.MCPServer, h *TrinoHandlers) {
 
 	m.AddTool(mcp.NewTool("execute_query",
-		mcp.WithDescription("Execute SQL queries on Trino's fast distributed query engine for big data analytics. Run SELECT, SHOW, DESCRIBE, EXPLAIN statements across multiple data sources simultaneously. Perfect for complex analytics, aggregations, joins, and cross-system data exploration on large datasets."),
+		mcp.WithDescription("Execute SQL queries on Trino's fast distributed query engine for big data analytics. Supports all SQL statements including SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, and other DML/DDL operations across multiple data sources simultaneously. Perfect for complex analytics, aggregations, joins, data manipulation, and cross-system data exploration on large datasets."),
 		mcp.WithTitleAnnotation("Execute Query"),
 		mcp.WithDestructiveHintAnnotation(true),
-		mcp.WithString("query", mcp.Required(), mcp.Description("SQL query to execute on Trino cluster (SELECT, SHOW, DESCRIBE, EXPLAIN supported)")),
+		mcp.WithString("query", mcp.Required(), mcp.Description("SQL query to execute on Trino cluster (supports all SQL statements including DML and DDL)")),
 	), h.ExecuteQuery)
 
 	m.AddTool(mcp.NewTool("list_catalogs",
