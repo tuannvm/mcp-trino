@@ -288,25 +288,36 @@ func RegisterTrinoTools(m *server.MCPServer, h *TrinoHandlers) {
 
 	m.AddTool(mcp.NewTool("execute_query",
 		mcp.WithDescription("Execute SQL queries on Trino's fast distributed query engine for big data analytics. Run SELECT, SHOW, DESCRIBE, EXPLAIN statements across multiple data sources simultaneously. Perfect for complex analytics, aggregations, joins, and cross-system data exploration on large datasets."),
+		mcp.WithTitleAnnotation("Execute Query"),
+		mcp.WithDestructiveHintAnnotation(true),
 		mcp.WithString("query", mcp.Required(), mcp.Description("SQL query to execute on Trino cluster (SELECT, SHOW, DESCRIBE, EXPLAIN supported)")),
 	), h.ExecuteQuery)
 
-	m.AddTool(mcp.NewTool("list_catalogs", mcp.WithDescription("Discover available Trino catalogs - each catalog represents a connector to different data systems (PostgreSQL, MySQL, S3, HDFS, Kafka, etc.). Catalogs are your entry point to querying data across heterogeneous systems in a single SQL query.")),
+	m.AddTool(mcp.NewTool("list_catalogs",
+		mcp.WithDescription("Discover available Trino catalogs - each catalog represents a connector to different data systems (PostgreSQL, MySQL, S3, HDFS, Kafka, etc.). Catalogs are your entry point to querying data across heterogeneous systems in a single SQL query."),
+		mcp.WithTitleAnnotation("List Catalogs"),
+		mcp.WithReadOnlyHintAnnotation(true)),
 		h.ListCatalogs)
 
 	m.AddTool(mcp.NewTool("list_schemas",
 		mcp.WithDescription("Browse schemas (databases/namespaces) within a Trino catalog. Each schema contains related tables and views. Use this to navigate the data hierarchy before querying specific datasets."),
+		mcp.WithTitleAnnotation("List Schemas"),
+		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithString("catalog", mcp.Description("Trino catalog name (optional; defaults to server configuration if omitted)"))),
 		h.ListSchemas)
 
 	m.AddTool(mcp.NewTool("list_tables",
 		mcp.WithDescription("Discover tables and views available for querying in Trino schemas. Essential for finding datasets to analyze. Can scope to specific catalog/schema or browse all available data across the distributed system."),
+		mcp.WithTitleAnnotation("List Tables"),
+		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithString("catalog", mcp.Description("Trino catalog name (optional)")),
 		mcp.WithString("schema", mcp.Description("Schema name within catalog (optional)"))),
 		h.ListTables)
 
 	m.AddTool(mcp.NewTool("get_table_schema",
 		mcp.WithDescription("Inspect table structure and column metadata from Trino's distributed data sources. Shows column names, data types, nullability, and constraints. Critical for understanding data before writing analytical queries."),
+		mcp.WithTitleAnnotation("Get Table Schema"),
+		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithString("catalog", mcp.Description("Trino catalog containing the table (optional)")),
 		mcp.WithString("schema", mcp.Description("Schema containing the table (optional)")),
 		mcp.WithString("table", mcp.Required(), mcp.Description("Table name to inspect"))),
@@ -314,6 +325,8 @@ func RegisterTrinoTools(m *server.MCPServer, h *TrinoHandlers) {
 
 	m.AddTool(mcp.NewTool("explain_query",
 		mcp.WithDescription("Analyze Trino query execution plans without running expensive queries. Shows distributed execution stages, data movement between nodes, and resource estimates. Essential for query optimization and performance tuning."),
+		mcp.WithTitleAnnotation("Explain Query"),
+		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithString("query", mcp.Required(), mcp.Description("SQL query to analyze (SELECT, JOIN, aggregations, etc.)")),
 		mcp.WithString("format", mcp.Description("Plan type: LOGICAL, DISTRIBUTED, VALIDATE, or IO (optional)"))),
 		h.ExplainQuery)
