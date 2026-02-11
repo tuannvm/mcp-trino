@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -31,6 +32,18 @@ type headerRoundTripper struct {
 
 func (t *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
+
+	// Strip default port from Host header to avoid proxy routing issues.
+	// Go's HTTP client includes the port in the Host header even for default
+	// ports (80/443), but some reverse proxies and load balancers don't
+	// recognize "host:80" as equivalent to "host", returning 503.
+	if host := req.URL.Host; host != "" {
+		hostname, port, err := net.SplitHostPort(host)
+		if err == nil && ((req.URL.Scheme == "http" && port == "80") || (req.URL.Scheme == "https" && port == "443")) {
+			req.URL.Host = hostname
+			req.Host = hostname
+		}
+	}
 
 	// Set X-Trino-Source header for query attribution
 	if t.config.TrinoSource != "" {
