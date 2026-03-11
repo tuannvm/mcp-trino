@@ -23,6 +23,7 @@ type TrinoConfig struct {
 	SSLInsecure       bool
 	AllowWriteQueries bool          // Controls whether non-read-only SQL queries are allowed
 	QueryTimeout      time.Duration // Query execution timeout
+	MaxRows           int           // Maximum number of rows returned per query (0 = unlimited)
 
 	// OAuth mode configuration
 	OAuthEnabled  bool   // Enable OAuth 2.1 authentication
@@ -85,8 +86,21 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 		}
 	}
 
+	// Parse max rows from environment variable
+	const defaultMaxRows = 10000
+	maxRowsStr := getEnv("TRINO_MAX_ROWS", strconv.Itoa(defaultMaxRows))
+	maxRows, err := strconv.Atoi(maxRowsStr)
+	switch {
+	case err != nil:
+		log.Printf("WARNING: Invalid TRINO_MAX_ROWS '%s': not an integer. Using default of %d", maxRowsStr, defaultMaxRows)
+		maxRows = defaultMaxRows
+	case maxRows < 0:
+		log.Printf("WARNING: Invalid TRINO_MAX_ROWS '%d': must be non-negative. Using default of %d", maxRows, defaultMaxRows)
+		maxRows = defaultMaxRows
+	}
+
 	// Parse query timeout from environment variable
-	const defaultTimeout = 30
+	const defaultTimeout = 300
 	timeoutStr := getEnv("TRINO_QUERY_TIMEOUT", strconv.Itoa(defaultTimeout))
 	timeoutInt, err := strconv.Atoi(timeoutStr)
 
@@ -174,6 +188,13 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 		log.Println("INFO: Trino user impersonation disabled (TRINO_ENABLE_IMPERSONATION=false)")
 	}
 
+	// Log max rows configuration
+	if maxRows > 0 {
+		log.Printf("INFO: Max rows per query: %d (TRINO_MAX_ROWS)", maxRows)
+	} else {
+		log.Println("WARNING: No row limit configured (TRINO_MAX_ROWS=0). Large queries may cause high memory usage.")
+	}
+
 	// Log query attribution configuration
 	log.Printf("INFO: Trino query source attribution: %s", trinoSource)
 
@@ -189,6 +210,7 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 		SSLInsecure:         sslInsecure,
 		AllowWriteQueries:   allowWriteQueries,
 		QueryTimeout:        queryTimeout,
+		MaxRows:             maxRows,
 		OAuthEnabled:        oauthEnabled,
 		OAuthMode:           oauthMode,
 		OAuthProvider:       oauthProvider,

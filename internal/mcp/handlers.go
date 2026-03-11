@@ -79,8 +79,18 @@ func (h *TrinoHandlers) ExecuteQuery(ctx context.Context, request mcp.CallToolRe
 		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil
 	}
 
+	// Build response with optional truncation notice
+	maxRows := h.Config.MaxRows
+	response := map[string]interface{}{
+		"results": results,
+	}
+	if maxRows > 0 && len(results) >= maxRows {
+		response["truncated"] = true
+		response["message"] = fmt.Sprintf("Result truncated to %d rows. Add LIMIT to your query or increase TRINO_MAX_ROWS.", maxRows)
+	}
+
 	// Convert results to JSON string for display
-	jsonData, err := json.MarshalIndent(results, "", "  ")
+	jsonData, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		mcpErr := fmt.Errorf("failed to marshal results to JSON: %w", err)
 		return mcp.NewToolResultErrorFromErr(mcpErr.Error(), mcpErr), nil

@@ -16,6 +16,66 @@ import (
 	oauth "github.com/tuannvm/oauth-mcp-proxy"
 )
 
+// Pre-compiled regexes for read-only query detection
+var (
+	readOnlyPrefixPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`^\s*select\b`),
+		regexp.MustCompile(`^\s*show\b`),
+		regexp.MustCompile(`^\s*describe\b`),
+		regexp.MustCompile(`^\s*explain\b`),
+		regexp.MustCompile(`^\s*with\b`),
+	}
+
+	showCreatePatterns = []*regexp.Regexp{
+		regexp.MustCompile(`^\s*show\s+create\s+table\b`),
+		regexp.MustCompile(`^\s*show\s+create\s+view\b`),
+		regexp.MustCompile(`^\s*show\s+create\s+schema\b`),
+		regexp.MustCompile(`^\s*show\s+create\s+materialized\s+view\b`),
+	}
+
+	showPrefixPattern = regexp.MustCompile(`^\s*show\b`)
+
+	safeStartPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`^\s*select\b`),
+		regexp.MustCompile(`^\s*describe\b`),
+		regexp.MustCompile(`^\s*explain\b`),
+		regexp.MustCompile(`^\s*with\b`),
+	}
+
+	// Pre-compiled write operation patterns
+	writeOpPatterns     []*regexp.Regexp
+	writeOpsExceptCreate []*regexp.Regexp
+
+	// Pre-compiled sanitization patterns
+	singleQuoteLiteral = regexp.MustCompile(`'(?:[^']|'')*'`)
+	doubleQuoteIdent   = regexp.MustCompile(`"(?:[^"]|"")*"`)
+	backtickIdent      = regexp.MustCompile("`[^`]*`")
+	singleLineComment  = regexp.MustCompile(`--[^\r\n]*`)
+	multiLineComment   = regexp.MustCompile(`/\*[^*]*\*+(?:[^/*][^*]*\*+)*/`)
+)
+
+func init() {
+	writeOps := []string{
+		"insert", "update", "delete", "drop", "create", "alter", "truncate",
+		"merge", "copy", "grant", "revoke", "commit", "rollback",
+		"call", "execute", "refresh", "set", "reset",
+	}
+	writeOpPatterns = make([]*regexp.Regexp, len(writeOps))
+	for i, op := range writeOps {
+		writeOpPatterns[i] = regexp.MustCompile(fmt.Sprintf(`\b%s\b`, regexp.QuoteMeta(op)))
+	}
+
+	writeOpsNoCreate := []string{
+		"insert", "update", "delete", "drop", "alter", "truncate",
+		"merge", "copy", "grant", "revoke", "commit", "rollback",
+		"call", "execute", "refresh", "set", "reset",
+	}
+	writeOpsExceptCreate = make([]*regexp.Regexp, len(writeOpsNoCreate))
+	for i, op := range writeOpsNoCreate {
+		writeOpsExceptCreate[i] = regexp.MustCompile(fmt.Sprintf(`\b%s\b`, regexp.QuoteMeta(op)))
+	}
+}
+
 // Context key for impersonated user
 type contextKey string
 
@@ -153,20 +213,8 @@ func isReadOnlyQuery(query string) bool {
 	// These are generally read-only operations. Use word boundaries for robustness.
 	// IMPORTANT: This check must come BEFORE write operation detection to avoid false positives
 	// (e.g., "SHOW CREATE TABLE" contains "create" but is read-only)
-	readOnlyPrefixPatterns := []string{
-		`^\s*select\b`,
-		`^\s*show\b`,
-		`^\s*describe\b`,
-		`^\s*explain\b`,
-		`^\s*with\b`,
-	}
-
-	for _, pattern := range readOnlyPrefixPatterns {
-		matched, _ := regexp.MatchString(pattern, queryLower)
-		if matched {
-			// For queries starting with read-only prefixes, we still need to check
-			// for disallowed write operations that might be embedded
-			// But we allow common read-only patterns like "SHOW CREATE TABLE"
+	for _, re := range readOnlyPrefixPatterns {
+		if re.MatchString(queryLower) {
 			if isAllowedReadOnlyPattern(queryLower) {
 				return true
 			}
@@ -175,17 +223,8 @@ func isReadOnlyQuery(query string) bool {
 
 	// Check for write operations anywhere in the query using word boundaries
 	//  - https://trino.io/docs/current/sql.html - Main SQL reference
-	writeOperations := []string{
-		"insert", "update", "delete", "drop", "create", "alter", "truncate",
-		"merge", "copy", "grant", "revoke", "commit", "rollback",
-		"call", "execute", "refresh", "set", "reset",
-	}
-
-	for _, op := range writeOperations {
-		// Use word boundary regex to catch operations followed by any whitespace
-		pattern := fmt.Sprintf(`\b%s\b`, regexp.QuoteMeta(op))
-		matched, _ := regexp.MatchString(pattern, queryLower)
-		if matched {
+	for _, re := range writeOpPatterns {
+		if re.MatchString(queryLower) {
 			return false
 		}
 	}
@@ -197,32 +236,16 @@ func isReadOnlyQuery(query string) bool {
 // even if it contains keywords that might look like write operations
 func isAllowedReadOnlyPattern(queryLower string) bool {
 	// SHOW CREATE statements are read-only (they just display DDL)
-	showCreatePatterns := []string{
-		`^\s*show\s+create\s+table\b`,
-		`^\s*show\s+create\s+view\b`,
-		`^\s*show\s+create\s+schema\b`,
-		`^\s*show\s+create\s+materialized\s+view\b`,
-	}
-
-	for _, pattern := range showCreatePatterns {
-		matched, _ := regexp.MatchString(pattern, queryLower)
-		if matched {
+	for _, re := range showCreatePatterns {
+		if re.MatchString(queryLower) {
 			return true
 		}
 	}
 
 	// Other SHOW statements without CREATE are safe
-	if matched, _ := regexp.MatchString(`^\s*show\b`, queryLower); matched {
-		// Check if it doesn't contain any write operation keywords after SHOW
-		// (except for "create" which is handled above)
-		writeOpsExceptCreate := []string{
-			"insert", "update", "delete", "drop", "alter", "truncate",
-			"merge", "copy", "grant", "revoke", "commit", "rollback",
-			"call", "execute", "refresh", "set", "reset",
-		}
-		for _, op := range writeOpsExceptCreate {
-			pattern := fmt.Sprintf(`\b%s\b`, regexp.QuoteMeta(op))
-			if matched, _ := regexp.MatchString(pattern, queryLower); matched {
+	if showPrefixPattern.MatchString(queryLower) {
+		for _, re := range writeOpsExceptCreate {
+			if re.MatchString(queryLower) {
 				return false
 			}
 		}
@@ -230,18 +253,10 @@ func isAllowedReadOnlyPattern(queryLower string) bool {
 	}
 
 	// SELECT, DESCRIBE, EXPLAIN, WITH without write operations are safe
-	safeStarts := []string{`^\s*select\b`, `^\s*describe\b`, `^\s*explain\b`, `^\s*with\b`}
-	for _, pattern := range safeStarts {
-		if matched, _ := regexp.MatchString(pattern, queryLower); matched {
-			// If it starts with a safe keyword, check there are no write operations
-			writeOps := []string{
-				"insert", "update", "delete", "drop", "create", "alter", "truncate",
-				"merge", "copy", "grant", "revoke", "commit", "rollback",
-				"call", "execute", "refresh", "set", "reset",
-			}
-			for _, op := range writeOps {
-				opPattern := fmt.Sprintf(`\b%s\b`, regexp.QuoteMeta(op))
-				if matched, _ := regexp.MatchString(opPattern, queryLower); matched {
+	for _, re := range safeStartPatterns {
+		if re.MatchString(queryLower) {
+			for _, wre := range writeOpPatterns {
+				if wre.MatchString(queryLower) {
 					return false
 				}
 			}
@@ -255,23 +270,11 @@ func isAllowedReadOnlyPattern(queryLower string) bool {
 // sanitizeQueryForKeywordDetection removes string literals, quoted identifiers, and comments
 // to prevent false positives when detecting write operations
 func sanitizeQueryForKeywordDetection(query string) string {
-	// Remove single-quoted string literals: 'text'
-	// Handle escaped quotes: 'don''t' becomes 'don''t'
-	query = regexp.MustCompile(`'(?:[^']|'')*'`).ReplaceAllString(query, "'LITERAL'")
-
-	// Remove double-quoted identifiers: "column_name"
-	// Handle escaped quotes: "column""name" becomes "column""name"
-	query = regexp.MustCompile(`"(?:[^"]|"")*"`).ReplaceAllString(query, "\"IDENTIFIER\"")
-
-	// Remove backtick-quoted identifiers: `column_name`
-	query = regexp.MustCompile("`[^`]*`").ReplaceAllString(query, "`IDENTIFIER`")
-
-	// Remove single-line comments: -- comment
-	query = regexp.MustCompile(`--[^\r\n]*`).ReplaceAllString(query, "")
-
-	// Remove multi-line comments: /* comment */
-	query = regexp.MustCompile(`/\*[^*]*\*+(?:[^/*][^*]*\*+)*/`).ReplaceAllString(query, "")
-
+	query = singleQuoteLiteral.ReplaceAllString(query, "'LITERAL'")
+	query = doubleQuoteIdent.ReplaceAllString(query, "\"IDENTIFIER\"")
+	query = backtickIdent.ReplaceAllString(query, "`IDENTIFIER`")
+	query = singleLineComment.ReplaceAllString(query, "")
+	query = multiLineComment.ReplaceAllString(query, "")
 	return strings.TrimSpace(query)
 }
 
@@ -349,10 +352,21 @@ func (c *Client) ExecuteQueryWithContext(ctx context.Context, query string) ([]m
 	}
 
 	// Prepare result container
-	results := make([]map[string]interface{}, 0)
+	maxRows := c.config.MaxRows
+	initialCap := 64
+	if maxRows > 0 && maxRows < initialCap {
+		initialCap = maxRows
+	}
+	results := make([]map[string]interface{}, 0, initialCap)
+	truncated := false
 
 	// Iterate through rows
 	for rows.Next() {
+		if maxRows > 0 && len(results) >= maxRows {
+			truncated = true
+			break
+		}
+
 		// Create a slice of interface{} to hold the values
 		values := make([]interface{}, len(columns))
 		valuePtrs := make([]interface{}, len(columns))
@@ -378,9 +392,18 @@ func (c *Client) ExecuteQueryWithContext(ctx context.Context, query string) ([]m
 		results = append(results, rowMap)
 	}
 
-	// Check for errors after iterating
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %w", err)
+	// When truncated, close rows immediately to stop server-side streaming
+	// before checking rows.Err() which could surface spurious cancel errors
+	if truncated {
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows after truncation: %v", err)
+		}
+		log.Printf("WARNING: Result truncated to %d rows (TRINO_MAX_ROWS limit). Add LIMIT to your query or increase TRINO_MAX_ROWS.", maxRows)
+	} else {
+		// Only check rows.Err() when we consumed the full result set
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("error iterating rows: %w", err)
+		}
 	}
 
 	return results, nil
