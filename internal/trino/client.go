@@ -297,16 +297,27 @@ func getQueryUsername(ctx context.Context) string {
 	return ""
 }
 
+// QueryResult holds query results along with metadata about truncation.
+type QueryResult struct {
+	Rows      []map[string]interface{}
+	Truncated bool // true if results were truncated by MaxRows limit
+	MaxRows   int  // the MaxRows limit that was applied (0 = unlimited)
+}
+
 // ExecuteQuery executes a SQL query and returns the results
 func (c *Client) ExecuteQuery(query string) ([]map[string]interface{}, error) {
-	return c.ExecuteQueryWithContext(context.Background(), query)
+	result, err := c.ExecuteQueryWithContext(context.Background(), query)
+	if err != nil {
+		return nil, err
+	}
+	return result.Rows, nil
 }
 
 // ExecuteQueryWithContext executes a SQL query and returns the results
 // It supports both:
 // - User impersonation via X-Trino-User header (when EnableImpersonation is true)
 // - Query attribution via X-Trino-Client-Tags/Info/Source (from OAuth user context)
-func (c *Client) ExecuteQueryWithContext(ctx context.Context, query string) ([]map[string]interface{}, error) {
+func (c *Client) ExecuteQueryWithContext(ctx context.Context, query string) (*QueryResult, error) {
 	// Strip trailing semicolon that Trino doesn't allow
 	query = strings.TrimSuffix(strings.TrimSpace(query), ";")
 
@@ -406,7 +417,11 @@ func (c *Client) ExecuteQueryWithContext(ctx context.Context, query string) ([]m
 		}
 	}
 
-	return results, nil
+	return &QueryResult{
+		Rows:      results,
+		Truncated: truncated,
+		MaxRows:   maxRows,
+	}, nil
 }
 
 // ListCatalogs returns a list of available catalogs
@@ -416,13 +431,13 @@ func (c *Client) ListCatalogs() ([]string, error) {
 
 // ListCatalogsWithContext returns a list of available catalogs with context
 func (c *Client) ListCatalogsWithContext(ctx context.Context) ([]string, error) {
-	results, err := c.ExecuteQueryWithContext(ctx, "SHOW CATALOGS")
+	result, err := c.ExecuteQueryWithContext(ctx, "SHOW CATALOGS")
 	if err != nil {
 		return nil, err
 	}
 
-	catalogs := make([]string, 0, len(results))
-	for _, row := range results {
+	catalogs := make([]string, 0, len(result.Rows))
+	for _, row := range result.Rows {
 		if catalog, ok := row["Catalog"].(string); ok {
 			catalogs = append(catalogs, catalog)
 		}
@@ -448,13 +463,13 @@ func (c *Client) ListSchemasWithContext(ctx context.Context, catalog string) ([]
 	}
 
 	query := fmt.Sprintf("SHOW SCHEMAS FROM %s", catalog)
-	results, err := c.ExecuteQueryWithContext(ctx, query)
+	result, err := c.ExecuteQueryWithContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 
-	schemas := make([]string, 0, len(results))
-	for _, row := range results {
+	schemas := make([]string, 0, len(result.Rows))
+	for _, row := range result.Rows {
 		if schema, ok := row["Schema"].(string); ok {
 			schemas = append(schemas, schema)
 		}
@@ -483,13 +498,13 @@ func (c *Client) ListTablesWithContext(ctx context.Context, catalog, schema stri
 	}
 
 	query := fmt.Sprintf("SHOW TABLES FROM %s.%s", catalog, schema)
-	results, err := c.ExecuteQueryWithContext(ctx, query)
+	result, err := c.ExecuteQueryWithContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 
-	tables := make([]string, 0, len(results))
-	for _, row := range results {
+	tables := make([]string, 0, len(result.Rows))
+	for _, row := range result.Rows {
 		if table, ok := row["Table"].(string); ok {
 			tables = append(tables, table)
 		}
@@ -504,12 +519,12 @@ func (c *Client) ListTablesWithContext(ctx context.Context, catalog, schema stri
 }
 
 // GetTableSchema returns the schema of a table
-func (c *Client) GetTableSchema(catalog, schema, table string) ([]map[string]interface{}, error) {
+func (c *Client) GetTableSchema(catalog, schema, table string) (*QueryResult, error) {
 	return c.GetTableSchemaWithContext(context.Background(), catalog, schema, table)
 }
 
 // GetTableSchemaWithContext returns the schema of a table with context
-func (c *Client) GetTableSchemaWithContext(ctx context.Context, catalog, schema, table string) ([]map[string]interface{}, error) {
+func (c *Client) GetTableSchemaWithContext(ctx context.Context, catalog, schema, table string) (*QueryResult, error) {
 	// Resolve catalog/schema/table parameters first
 	parts := strings.Split(table, ".")
 	if len(parts) == 3 {
@@ -547,12 +562,12 @@ func (c *Client) GetTableSchemaWithContext(ctx context.Context, catalog, schema,
 }
 
 // ExplainQuery returns the query execution plan for a given SQL query
-func (c *Client) ExplainQuery(query string, format string) ([]map[string]interface{}, error) {
+func (c *Client) ExplainQuery(query string, format string) (*QueryResult, error) {
 	return c.ExplainQueryWithContext(context.Background(), query, format)
 }
 
 // ExplainQueryWithContext returns the query execution plan for a given SQL query with context
-func (c *Client) ExplainQueryWithContext(ctx context.Context, query string, format string) ([]map[string]interface{}, error) {
+func (c *Client) ExplainQueryWithContext(ctx context.Context, query string, format string) (*QueryResult, error) {
 	// Build EXPLAIN query with optional TYPE format (LOGICAL|DISTRIBUTED|VALIDATE|IO)
 	explainQuery := "EXPLAIN"
 	if f := strings.ToUpper(strings.TrimSpace(format)); f != "" {

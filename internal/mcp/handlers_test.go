@@ -233,53 +233,65 @@ func TestConfigPropagation(t *testing.T) {
 	}
 }
 
-// TestTruncationResponseJSON exercises the exact JSON structure produced by
-// the truncation path, matching the handler's fmt.Sprintf format string.
-func TestTruncationResponseJSON(t *testing.T) {
+// TestTruncationResponseFormat verifies that when results hit MaxRows:
+// - Text content (backward-compat) is a bare JSON array
+// - StructuredContent carries the truncation envelope with metadata
+func TestTruncationResponseFormat(t *testing.T) {
 	maxRows := 5
 	results := make([]map[string]interface{}, maxRows)
 	for i := range results {
 		results[i] = map[string]interface{}{"row": i + 1}
 	}
 
-	// Mirror exact logic from handlers.go lines 83-89
-	response := map[string]interface{}{
-		"results": results,
+	// Simulate the handler's truncation path using mcp.NewToolResultStructured
+	structured := map[string]interface{}{
+		"results":   results,
+		"truncated": true,
+		"rowCount":  len(results),
+		"message":   fmt.Sprintf("Result truncated to %d rows. Add LIMIT to your query or increase TRINO_MAX_ROWS.", maxRows),
 	}
-	if maxRows > 0 && len(results) >= maxRows {
-		response["truncated"] = true
-		response["message"] = fmt.Sprintf("Result truncated to %d rows. Add LIMIT to your query or increase TRINO_MAX_ROWS.", maxRows)
-	}
-
-	jsonData, err := json.MarshalIndent(response, "", "  ")
+	bareJSON, err := json.MarshalIndent(results, "", "  ")
 	if err != nil {
-		t.Fatalf("failed to marshal response: %v", err)
+		t.Fatalf("failed to marshal results: %v", err)
 	}
 
-	var parsed map[string]interface{}
-	if err := json.Unmarshal(jsonData, &parsed); err != nil {
-		t.Fatalf("failed to unmarshal response JSON: %v", err)
-	}
+	result := mcp.NewToolResultStructured(structured, string(bareJSON))
 
-	if truncated, ok := parsed["truncated"].(bool); !ok || !truncated {
-		t.Error("expected truncated=true in JSON output")
+	// Verify text content is the bare array (backward-compatible)
+	if len(result.Content) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(result.Content))
 	}
-
-	msg, ok := parsed["message"].(string)
+	tc, ok := result.Content[0].(mcp.TextContent)
 	if !ok {
-		t.Fatal("expected message field in JSON output")
+		t.Fatal("expected TextContent in content[0]")
+	}
+	// Text should parse as a JSON array, not an object
+	var arr []interface{}
+	if err := json.Unmarshal([]byte(tc.Text), &arr); err != nil {
+		t.Fatalf("text content is not a bare JSON array: %v", err)
+	}
+	if len(arr) != 5 {
+		t.Errorf("expected 5 results in text content, got %d", len(arr))
+	}
+
+	// Verify structuredContent carries the envelope
+	if result.StructuredContent == nil {
+		t.Fatal("expected structuredContent to be set")
+	}
+	scJSON, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("failed to marshal structuredContent: %v", err)
+	}
+	var sc map[string]interface{}
+	if err := json.Unmarshal(scJSON, &sc); err != nil {
+		t.Fatalf("structuredContent is not a JSON object: %v", err)
+	}
+	if truncated, ok := sc["truncated"].(bool); !ok || !truncated {
+		t.Error("expected structuredContent.truncated=true")
 	}
 	expectedMsg := "Result truncated to 5 rows. Add LIMIT to your query or increase TRINO_MAX_ROWS."
-	if msg != expectedMsg {
-		t.Errorf("message = %q, want %q", msg, expectedMsg)
-	}
-
-	resultArr, ok := parsed["results"].([]interface{})
-	if !ok {
-		t.Fatal("expected results array in JSON output")
-	}
-	if len(resultArr) != 5 {
-		t.Errorf("expected 5 results, got %d", len(resultArr))
+	if msg, ok := sc["message"].(string); !ok || msg != expectedMsg {
+		t.Errorf("structuredContent.message = %q, want %q", sc["message"], expectedMsg)
 	}
 }
 
@@ -307,34 +319,37 @@ func TestTruncationConditions(t *testing.T) {
 				results[i] = map[string]interface{}{"id": i}
 			}
 
-			response := map[string]interface{}{
-				"results": results,
-			}
 			maxRows := tt.maxRows
-			if maxRows > 0 && len(results) >= maxRows {
-				response["truncated"] = true
-				response["message"] = fmt.Sprintf("Result truncated to %d rows. Add LIMIT to your query or increase TRINO_MAX_ROWS.", maxRows)
+			truncated := maxRows > 0 && len(results) >= maxRows
+
+			if truncated != tt.wantTruncated {
+				t.Errorf("truncated = %v, want %v", truncated, tt.wantTruncated)
 			}
 
-			_, hasTruncated := response["truncated"]
-			if hasTruncated != tt.wantTruncated {
-				t.Errorf("truncated presence = %v, want %v", hasTruncated, tt.wantTruncated)
-			}
-
-			if tt.wantTruncated {
-				if truncated, ok := response["truncated"].(bool); !ok || !truncated {
-					t.Error("expected truncated=true")
+			// Verify the handler would produce the right result type
+			if truncated {
+				structured := map[string]interface{}{
+					"results":   results,
+					"truncated": true,
+					"rowCount":  len(results),
+					"message":   fmt.Sprintf("Result truncated to %d rows. Add LIMIT to your query or increase TRINO_MAX_ROWS.", maxRows),
 				}
-				if msg, ok := response["message"].(string); !ok || msg == "" {
-					t.Error("expected non-empty truncation message")
+				result := mcp.NewToolResultStructured(structured, "[]")
+				if result.StructuredContent == nil {
+					t.Error("expected structuredContent when truncated")
+				}
+			} else {
+				result := mcp.NewToolResultText("[]")
+				if result.StructuredContent != nil {
+					t.Error("expected no structuredContent when not truncated")
 				}
 			}
 		})
 	}
 }
 
-// TestNoTruncationWhenUnderLimit verifies no truncation fields are added
-// when results are under the configured MaxRows.
+// TestNoTruncationWhenUnderLimit verifies that when results are under MaxRows,
+// the response uses plain NewToolResultText (no structuredContent).
 func TestNoTruncationWhenUnderLimit(t *testing.T) {
 	maxRows := 10
 	results := make([]map[string]interface{}, 3)
@@ -342,29 +357,37 @@ func TestNoTruncationWhenUnderLimit(t *testing.T) {
 		results[i] = map[string]interface{}{"row": i + 1}
 	}
 
-	response := map[string]interface{}{
-		"results": results,
-	}
-	if maxRows > 0 && len(results) >= maxRows {
-		response["truncated"] = true
-		response["message"] = fmt.Sprintf("Result truncated to %d rows. Add LIMIT to your query or increase TRINO_MAX_ROWS.", maxRows)
+	// Simulate the handler's non-truncated path
+	truncated := maxRows > 0 && len(results) >= maxRows
+	if truncated {
+		t.Fatal("should not be truncated with 3 results and maxRows=10")
 	}
 
-	jsonData, err := json.MarshalIndent(response, "", "  ")
+	jsonData, err := json.MarshalIndent(results, "", "  ")
 	if err != nil {
-		t.Fatalf("failed to marshal response: %v", err)
+		t.Fatalf("failed to marshal results: %v", err)
+	}
+	result := mcp.NewToolResultText(string(jsonData))
+
+	// Verify text content is the bare JSON array
+	if len(result.Content) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(result.Content))
+	}
+	tc, ok := result.Content[0].(mcp.TextContent)
+	if !ok {
+		t.Fatal("expected TextContent")
+	}
+	var arr []interface{}
+	if err := json.Unmarshal([]byte(tc.Text), &arr); err != nil {
+		t.Fatalf("text content is not a bare JSON array: %v", err)
+	}
+	if len(arr) != 3 {
+		t.Errorf("expected 3 results, got %d", len(arr))
 	}
 
-	var parsed map[string]interface{}
-	if err := json.Unmarshal(jsonData, &parsed); err != nil {
-		t.Fatalf("failed to unmarshal response JSON: %v", err)
-	}
-
-	if _, ok := parsed["truncated"]; ok {
-		t.Error("expected no truncated field when under limit")
-	}
-	if _, ok := parsed["message"]; ok {
-		t.Error("expected no message field when under limit")
+	// Verify no structuredContent
+	if result.StructuredContent != nil {
+		t.Error("expected no structuredContent when under limit")
 	}
 }
 
