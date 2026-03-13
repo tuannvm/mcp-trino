@@ -197,12 +197,12 @@ func isReadOnlyQuery(query string) bool {
 	// Convert to lowercase for case-insensitive comparison and normalize whitespace
 	queryLower := strings.ToLower(strings.TrimSpace(query))
 
+	// Remove string literals and comments to avoid false positives
+	queryLower = sanitizeQueryForKeywordDetection(queryLower)
+
 	// Replace any newline characters with spaces to normalize the query format
 	queryLower = strings.ReplaceAll(queryLower, "\n", " ")
 	queryLower = strings.ReplaceAll(queryLower, "\r", " ")
-
-	// Remove string literals and comments to avoid false positives
-	queryLower = sanitizeQueryForKeywordDetection(queryLower)
 
 	// First check for SQL injection attempts with multiple statements
 	if strings.Contains(queryLower, ";") {
