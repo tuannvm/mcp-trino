@@ -101,6 +101,7 @@ jobs:
           output: "trivy-results.sarif"
           severity: "CRITICAL,HIGH,MEDIUM"
           timeout: "10m"
+          version: "v0.69.3"
 
       - name: Upload security scan results
         uses: github/codeql-action/upload-sarif@v4
