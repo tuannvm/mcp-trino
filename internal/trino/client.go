@@ -2,6 +2,7 @@ package trino
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"fmt"
 	"log"
@@ -132,9 +133,18 @@ func NewClient(cfg *config.TrinoConfig) (*Client, error) {
 	dsnURL.RawQuery = params.Encode()
 	dsn := dsnURL.String()
 
+	baseTransport := http.DefaultTransport
+	if cfg.SSLInsecure {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: true,
+			MinVersion:         tls.VersionTLS12,
+		}
+		baseTransport = transport
+	}
 	httpClient := &http.Client{
 		Transport: &headerRoundTripper{
-			base:   http.DefaultTransport,
+			base:   baseTransport,
 			config: cfg,
 		},
 	}
@@ -197,12 +207,14 @@ func isReadOnlyQuery(query string) bool {
 	// Convert to lowercase for case-insensitive comparison and normalize whitespace
 	queryLower := strings.ToLower(strings.TrimSpace(query))
 
+	// Remove string literals and comments BEFORE replacing newlines,
+	// so single-line comment regex (--[^\r\n]*) can use newline as terminator.
+	// See: https://github.com/tuannvm/mcp-trino/issues/161
+	queryLower = sanitizeQueryForKeywordDetection(queryLower)
+
 	// Replace any newline characters with spaces to normalize the query format
 	queryLower = strings.ReplaceAll(queryLower, "\n", " ")
 	queryLower = strings.ReplaceAll(queryLower, "\r", " ")
-
-	// Remove string literals and comments to avoid false positives
-	queryLower = sanitizeQueryForKeywordDetection(queryLower)
 
 	// First check for SQL injection attempts with multiple statements
 	if strings.Contains(queryLower, ";") {
