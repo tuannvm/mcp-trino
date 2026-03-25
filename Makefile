@@ -1,4 +1,4 @@
-.PHONY: build build-dxt pack-dxt test clean run-dev release-snapshot run-docker run docker-compose-up docker-compose-down lint docker-test
+.PHONY: build build-dxt pack-dxt test clean run-dev release-snapshot run-docker run docker-compose-up docker-compose-down lint docker-test cli install-cli
 
 # Variables
 BINARY_NAME=mcp-trino
@@ -9,6 +9,16 @@ BUILD_DIR=bin
 build:
 	mkdir -p $(BUILD_DIR)
 	go build -ldflags "-X main.Version=$(VERSION)" -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd
+
+# Build CLI binary (alias for build)
+cli: build
+
+# Install CLI binary to $GOPATH/bin or $HOME/go/bin
+install-cli: build
+	@echo "Installing $(BINARY_NAME) to $$(go env GOPATH)/bin/..."
+	@mkdir -p $$(go env GOPATH)/bin
+	@cp $(BUILD_DIR)/$(BINARY_NAME) $$(go env GOPATH)/bin/
+	@echo "Installed successfully. You can now run: $(BINARY_NAME) --version"
 
 # Build all platform-specific binaries for DXT packaging
 build-dxt:
