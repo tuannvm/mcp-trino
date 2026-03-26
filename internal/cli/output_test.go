@@ -89,7 +89,7 @@ func TestOutputTable_DeterministicColumnOrder(t *testing.T) {
 			}
 
 			if tt.name == "single row multiple columns" {
-				expected := "apple  banana  zebra  \n-----  ------  -----  \na      3.14    1      \n"
+				expected := "apple  banana  zebra  \n-----  ------  -----  \na      3.14    1      \n\n1 row(s)\n"
 				if out1 != expected {
 					t.Errorf("outputTable() exact output mismatch:\nexpected:\n%s\ngot:\n%s", expected, out1)
 				}
@@ -190,7 +190,7 @@ func TestFormatOutput_TableFormat(t *testing.T) {
 	if err != nil {
 		t.Errorf("formatOutput(table) failed: %v", err)
 	}
-	expected := "col1    col2  \n------  ----  \nvalue1  123   \n"
+	expected := "col1    col2  \n------  ----  \nvalue1  123   \n\n1 row(s)\n"
 	if output != expected {
 		t.Errorf("formatOutput(table) output mismatch:\nexpected:\n%s\ngot:\n%s", expected, output)
 	}
