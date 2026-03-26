@@ -47,22 +47,45 @@ After: `apple | banana | zebra` (alphabetically sorted)
 
 Values are applied in this order (later overrides earlier):
 
-1. **Defaults** (hardcoded)
-2. **Config file** (`~/.config/trino/config.yaml`)
-3. **Environment variables** (`TRINO_*`)
-4. **CLI flags** (`--host`, `--port`, etc.)
+1. **CLI flags** (`--host`, `--port`, etc.) - highest priority
+2. **`--profile` flag** (select named profile)
+3. **`TRINO_PROFILE` environment variable**
+4. **`current` field** in config file
+5. **`default` profile** fallback
+6. **Environment variables** (`TRINO_HOST`, etc.) - lowest priority
 
 **Example:**
 ```yaml
-# config.yaml
-trino:
-  host: from-config
+# ~/.config/trino/config.yaml
+current: prod
+profiles:
+  prod:
+    host: prod.example.com
+    port: 443
+    user: prod_user
+  dev:
+    host: localhost
+    port: 8080
+    user: trino
 ```
 
 ```bash
-export TRINO_HOST=from-env
-mcp-trino --host from-flag query "SELECT 1"
-# Uses: from-flag (highest priority)
+# CLI flag overrides everything
+mcp-trino --host custom --profile prod query "SELECT 1"
+# Uses: host=custom (flag), other values from prod profile
+
+# Profile selection via flag
+mcp-trino --profile dev catalogs
+# Uses: dev profile values
+
+# Profile selection via env var
+export TRINO_PROFILE=prod
+mcp-trino catalogs
+# Uses: prod profile values
+
+# Default profile (no explicit selection)
+mcp-trino catalogs
+# Uses: 'prod' profile (from 'current' field)
 ```
 
 ## Mode Selection Logic
@@ -148,12 +171,37 @@ trino> \quit
 ### Config File
 ```yaml
 # ~/.config/trino/config.yaml
-trino:
-  host: trino.example.com
-  port: 443
-  user: myuser
-  password: mypass
-  catalog: hive
+current: prod
+
+profiles:
+  prod:
+    host: trino.example.com
+    port: 443
+    user: prod_user
+    password: prod_password
+    catalog: hive
+    schema: analytics
+    ssl:
+      enabled: true
+      insecure: false
+
+  dev:
+    host: localhost
+    port: 8080
+    user: trino
+    catalog: memory
+    schema: default
+
+  staging:
+    host: staging-trino.example.com
+    port: 443
+    user: staging_user
+    catalog: hive
+    schema: analytics_staging
+
+output:
+  format: table
+```
   schema: analytics
   ssl:
     enabled: true

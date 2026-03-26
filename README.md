@@ -158,24 +158,68 @@ mcp-trino --format csv query "SELECT 1"
 mcp-trino --format table query "SELECT 1"  # default
 ```
 
+### Named Profiles
+
+mcp-trino supports named connection profiles for easy switching between Trino environments:
+
 **Configuration File** (~/.config/trino/config.yaml):
 
 ```yaml
-trino:
-  host: trino.example.com
-  port: 443
-  user: myuser
-  password: mypass
-  catalog: hive
-  schema: analytics
-  ssl:
-    enabled: true
-    insecure: false
+current: prod
+
+profiles:
+  prod:
+    host: trino.example.com
+    port: 443
+    user: prod_user
+    password: prod_password
+    catalog: hive
+    schema: analytics
+    ssl:
+      enabled: true
+      insecure: false
+
+  dev:
+    host: localhost
+    port: 8080
+    user: trino
+    catalog: memory
+    schema: default
+
+  staging:
+    host: staging-trino.example.com
+    port: 443
+    user: staging_user
+
 output:
   format: table
 ```
 
-**Environment Variables** (override config file):
+**Profile Management Commands:**
+
+```bash
+# List all profiles
+mcp-trino config profile list
+
+# Set default profile
+mcp-trino config profile use prod
+
+# Show profile details
+mcp-trino config profile show staging
+
+# Use a specific profile (overrides config file)
+mcp-trino --profile dev catalogs
+```
+
+**Configuration Precedence** (highest to lowest):
+1. CLI flags (`--host`, `--port`, etc.)
+2. `--profile` flag
+3. `TRINO_PROFILE` environment variable
+4. `current` field in config file
+5. `default` profile fallback
+6. Environment variables (`TRINO_HOST`, etc.)
+
+**Environment Variables** (lowest priority - overridden by profiles and flags):
 
 ```bash
 export TRINO_HOST=trino.example.com
@@ -185,6 +229,7 @@ export TRINO_PASSWORD=mypass
 export TRINO_CATALOG=hive
 export TRINO_SCHEMA=analytics
 export TRINO_SSL=true
+```
 ```
 
 **REPL Meta-Commands** (in interactive mode):
