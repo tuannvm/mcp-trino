@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -28,7 +29,7 @@ type CLIConfig struct {
 	// ConfigPath tracks where this config was loaded from (not saved to YAML)
 	ConfigPath string `yaml:"-"`
 
-	Current  string                       `yaml:"current"` // default profile name
+	Current  string                        `yaml:"current"` // default profile name
 	Profiles map[string]TrinoProfileConfig `yaml:"profiles"`
 	Output   struct {
 		Format string `yaml:"format"` // table, json, csv
@@ -77,19 +78,18 @@ func LoadCLIConfig() (*CLIConfig, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	// Auto-migrate legacy flat config to profiles
-	if err := cfg.migrateLegacyConfig(); err != nil {
+	migrated, err := cfg.migrateLegacyConfig()
+	if err != nil {
 		return nil, fmt.Errorf("failed to migrate legacy config: %w", err)
 	}
-
-	// If no profiles exist after migration, ensure we have a default profile
-	if len(cfg.Profiles) == 0 {
-		cfg.Profiles = defaultCLIConfig().Profiles
-		if cfg.Current == "" {
-			cfg.Current = "default"
+	if migrated {
+		cfg.ConfigPath = configPath
+		if err := SaveCLIConfig(&cfg); err != nil {
+			return nil, fmt.Errorf("failed to save migrated config: %w", err)
 		}
 	}
 
+	ensureProfilesAndCurrent(&cfg)
 	cfg.ConfigPath = configPath
 	return &cfg, nil
 }
@@ -101,16 +101,10 @@ func ParseCLIConfig(data []byte) (*CLIConfig, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 	// Auto-migrate legacy flat config to profiles for custom config files too
-	if err := cfg.migrateLegacyConfig(); err != nil {
+	if _, err := cfg.migrateLegacyConfig(); err != nil {
 		return nil, fmt.Errorf("failed to migrate legacy config: %w", err)
 	}
-	// If no profiles exist after migration, ensure we have a default profile
-	if len(cfg.Profiles) == 0 {
-		cfg.Profiles = defaultCLIConfig().Profiles
-		if cfg.Current == "" {
-			cfg.Current = "default"
-		}
-	}
+	ensureProfilesAndCurrent(&cfg)
 	return &cfg, nil
 }
 
@@ -123,16 +117,10 @@ func ParseCLIConfigWithPath(data []byte, configPath string) (*CLIConfig, error) 
 	// Set ConfigPath before migration so it saves to the correct location
 	cfg.ConfigPath = configPath
 	// Auto-migrate legacy flat config to profiles
-	if err := cfg.migrateLegacyConfig(); err != nil {
+	if _, err := cfg.migrateLegacyConfig(); err != nil {
 		return nil, fmt.Errorf("failed to migrate legacy config: %w", err)
 	}
-	// If no profiles exist after migration, ensure we have a default profile
-	if len(cfg.Profiles) == 0 {
-		cfg.Profiles = defaultCLIConfig().Profiles
-		if cfg.Current == "" {
-			cfg.Current = "default"
-		}
-	}
+	ensureProfilesAndCurrent(&cfg)
 	return &cfg, nil
 }
 
@@ -195,7 +183,7 @@ func defaultCLIConfig() *CLIConfig {
 }
 
 // migrateLegacyConfig migrates old flat trino config to profiles structure
-func (c *CLIConfig) migrateLegacyConfig() error {
+func (c *CLIConfig) migrateLegacyConfig() (bool, error) {
 	// Check if we have legacy flat config (has trino.host but no profiles)
 	hasLegacyConfig := c.Trino.Host != ""
 	hasProfiles := len(c.Profiles) > 0
@@ -232,12 +220,9 @@ func (c *CLIConfig) migrateLegacyConfig() error {
 				Insecure bool  `yaml:"insecure"`
 			} `yaml:"ssl"`
 		}{}
-		// Save the migrated config
-		if err := SaveCLIConfig(c); err != nil {
-			return fmt.Errorf("failed to save migrated config: %w", err)
-		}
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
 // GetActiveProfile returns the active profile based on precedence:
@@ -280,15 +265,17 @@ func (c *CLIConfig) getProfileNames() []string {
 	for name := range c.Profiles {
 		names = append(names, name)
 	}
-	// Simple sort (could use sort.Strings but avoiding import for now)
-	for i := 0; i < len(names); i++ {
-		for j := i + 1; j < len(names); j++ {
-			if names[i] > names[j] {
-				names[i], names[j] = names[j], names[i]
-			}
-		}
-	}
+	sort.Strings(names)
 	return names
+}
+
+func ensureProfilesAndCurrent(cfg *CLIConfig) {
+	if len(cfg.Profiles) == 0 {
+		cfg.Profiles = defaultCLIConfig().Profiles
+	}
+	if cfg.Current == "" {
+		cfg.Current = "default"
+	}
 }
 
 // GetProfileNames returns a sorted list of profile names (public)

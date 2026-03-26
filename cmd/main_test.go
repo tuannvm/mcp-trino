@@ -47,6 +47,11 @@ func TestShouldRunCLIMode_KnownCommands(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "single-dash interactive flag",
+			args:     []string{"-interactive"},
+			expected: true,
+		},
+		{
 			name:     "with flags before command",
 			args:     []string{"--format", "json", "query", "SELECT 1"},
 			expected: true,
@@ -83,6 +88,11 @@ func TestShouldRunCLIMode_UnknownCommands(t *testing.T) {
 			name:     "multiple unknown arguments",
 			args:     []string{"arg1", "arg2"},
 			expected: false, // Critical for MCP compatibility
+		},
+		{
+			name:     "first positional is unknown, later known command should not flip mode",
+			args:     []string{"unknown", "query"},
+			expected: false, // Only first positional arg should determine command mode
 		},
 		{
 			name:     "empty args",
@@ -145,6 +155,11 @@ func TestHasCLIOnlyFlags(t *testing.T) {
 		{
 			name:     "interactive flag",
 			args:     []string{"--interactive"},
+			expected: true,
+		},
+		{
+			name:     "single-dash long form profile flag",
+			args:     []string{"-profile", "prod"},
 			expected: true,
 		},
 		{

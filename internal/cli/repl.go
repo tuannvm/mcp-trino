@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -67,7 +68,7 @@ func (r *REPL) Run(ctx context.Context) error {
 		// Handle special commands
 		if strings.HasPrefix(line, "\\") {
 			if err := r.handleMetaCommand(ctx, line, &history); err != nil {
-				if err == ErrExitREPL {
+				if errors.Is(err, ErrExitREPL) {
 					return nil
 				}
 				fmt.Printf("Error: %v\n", err)
@@ -113,7 +114,7 @@ func (r *REPL) Run(ctx context.Context) error {
 }
 
 // ErrExitREPL is returned when the user wants to exit the REPL
-var ErrExitREPL = fmt.Errorf("exit REPL")
+var ErrExitREPL = errors.New("exit REPL")
 
 // handleMetaCommand handles REPL meta-commands (prefixed with \)
 func (r *REPL) handleMetaCommand(ctx context.Context, cmd string, history *[]string) error {

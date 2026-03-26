@@ -121,10 +121,9 @@ func TestGetOutputFormat(t *testing.T) {
 }
 
 func TestApplyToEnv(t *testing.T) {
-	// Clean environment before test
 	envVars := []string{"TRINO_HOST", "TRINO_PORT", "TRINO_USER", "TRINO_PASSWORD", "TRINO_CATALOG", "TRINO_SCHEMA", "TRINO_SSL", "TRINO_SOURCE"}
 	for _, envVar := range envVars {
-		_ = os.Unsetenv(envVar)
+		t.Setenv(envVar, "")
 	}
 
 	sslEnabled := true
@@ -170,8 +169,7 @@ func TestApplyToEnv(t *testing.T) {
 }
 
 func TestApplyToEnv_SSLDisabled(t *testing.T) {
-	// Clean environment before test
-	_ = os.Unsetenv("TRINO_SSL")
+	t.Setenv("TRINO_SSL", "")
 
 	sslEnabled := false
 	cfg := &CLIConfig{
@@ -198,8 +196,7 @@ func TestApplyToEnv_SSLDisabled(t *testing.T) {
 }
 
 func TestApplyToEnv_SSLNotSet(t *testing.T) {
-	// Clean environment before test
-	_ = os.Unsetenv("TRINO_SSL")
+	t.Setenv("TRINO_SSL", "")
 
 	cfg := &CLIConfig{
 		Current: "test-profile",
@@ -228,13 +225,8 @@ func TestApplyToEnv_SSLNotSet(t *testing.T) {
 func TestLoadCLIConfig_MissingFile(t *testing.T) {
 	// Use a temp directory to ensure config doesn't exist
 	tmpDir := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", originalHome)
-	})
-
 	// Set HOME to temp dir (where no .config/trino/config.yaml exists)
-	_ = os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 
 	cfg, err := LoadCLIConfig()
 	if err != nil {
@@ -249,11 +241,7 @@ func TestLoadCLIConfig_MissingFile(t *testing.T) {
 
 func TestSaveCLIConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", originalHome)
-	})
-	_ = os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 
 	cfg := &CLIConfig{
 		Current: "default",
@@ -481,11 +469,7 @@ func TestGetProfileNames(t *testing.T) {
 
 func TestSetCurrent(t *testing.T) {
 	tmpDir := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", originalHome)
-	})
-	_ = os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
 
 	cfg := &CLIConfig{
 		Current: "default",

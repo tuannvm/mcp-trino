@@ -164,12 +164,13 @@ func runMCPServer() {
 func shouldRunCLIMode(args []string) bool {
 	// Check for explicit CLI flags
 	for _, arg := range args {
-		if arg == "--cli" || arg == "--interactive" {
+		flagName := normalizedFlagName(arg)
+		if flagName == "--cli" || flagName == "--interactive" {
 			return true
 		}
 	}
 
-	// Check for CLI subcommands (first non-flag argument)
+	// Check for CLI subcommands (first positional argument only)
 	cliCommands := map[string]bool{
 		"query":       true,
 		"catalogs":    true,
@@ -181,21 +182,13 @@ func shouldRunCLIMode(args []string) bool {
 		"config":      true, // config profile management
 	}
 
-	for _, arg := range args {
-		// Skip flags
-		if strings.HasPrefix(arg, "-") {
-			continue
-		}
-		// Only return true if it's a known CLI command
-		// Unknown positional args should NOT trigger CLI mode (preserves MCP compatibility)
-		if cliCommands[arg] {
-			return true
-		}
-		// Unknown positional argument - don't assume CLI mode
-		// This preserves backward compatibility for MCP integrations
+	firstPositional := firstPositionalArg(args)
+	if firstPositional == "" {
+		return false
 	}
 
-	return false
+	// Unknown positional args should NOT trigger CLI mode (preserves MCP compatibility)
+	return cliCommands[firstPositional]
 }
 
 // isTTY checks if stdin is a terminal (interactive)
@@ -210,10 +203,48 @@ func isTTY() bool {
 // hasCLIOnlyFlags checks if args contain CLI-only flags (no subcommand)
 func hasCLIOnlyFlags(args []string) bool {
 	cliFlags := map[string]bool{
-		"--help":     true,
-		"-h":         true,
-		"--version":  true,
-		"-v":         true,
+		"--help":        true,
+		"-h":            true,
+		"--version":     true,
+		"-v":            true,
+		"--config":      true,
+		"--format":      true,
+		"--host":        true,
+		"--port":        true,
+		"--user":        true,
+		"--password":    true,
+		"--catalog":     true,
+		"--schema":      true,
+		"--profile":     true, // profile selection is CLI-specific
+		"--interactive": true,
+	}
+
+	// Check if we have any CLI flags
+	for _, arg := range args {
+		flagName := normalizedFlagName(arg)
+		if flagName != "" && cliFlags[flagName] {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedFlagName(arg string) string {
+	if !strings.HasPrefix(arg, "-") || arg == "-" {
+		return ""
+	}
+	flagName := strings.Split(arg, "=")[0]
+	if strings.HasPrefix(flagName, "--") {
+		return flagName
+	}
+	if len(flagName) == 2 {
+		return flagName
+	}
+	return "--" + strings.TrimPrefix(flagName, "-")
+}
+
+func firstPositionalArg(args []string) string {
+	flagsWithValue := map[string]bool{
 		"--config":   true,
 		"--format":   true,
 		"--host":     true,
@@ -222,25 +253,25 @@ func hasCLIOnlyFlags(args []string) bool {
 		"--password": true,
 		"--catalog":  true,
 		"--schema":   true,
-		"--profile":  true, // profile selection is CLI-specific
-		"--interactive": true,
+		"--profile":  true,
 	}
 
-	// Check if we have any CLI flags
+	skipNext := false
 	for _, arg := range args {
-		if strings.HasPrefix(arg, "--") {
-			flagName := strings.Split(arg, "=")[0]
-			if cliFlags[flagName] {
-				return true
-			}
+		if skipNext {
+			skipNext = false
+			continue
 		}
-		if strings.HasPrefix(arg, "-") && len(arg) == 2 {
-			if cliFlags[arg] {
-				return true
+		flagName := normalizedFlagName(arg)
+		if flagName != "" {
+			if !strings.Contains(arg, "=") && flagsWithValue[flagName] {
+				skipNext = true
 			}
+			continue
 		}
+		return arg
 	}
-	return false
+	return ""
 }
 
 func getEnv(key, def string) string {

@@ -248,7 +248,9 @@ func RunCLIMode() error {
 
 	// Handle interactive mode
 	if *interactive || (len(args) > 0 && args[0] == "interactive") {
-		repl := cli.NewREPL(commands, *catalog, *schema)
+		replCatalog := os.Getenv("TRINO_CATALOG")
+		replSchema := os.Getenv("TRINO_SCHEMA")
+		repl := cli.NewREPL(commands, replCatalog, replSchema)
 		return repl.Run(ctx)
 	}
 
