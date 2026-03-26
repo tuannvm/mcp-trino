@@ -82,6 +82,14 @@ func LoadCLIConfig() (*CLIConfig, error) {
 		return nil, fmt.Errorf("failed to migrate legacy config: %w", err)
 	}
 
+	// If no profiles exist after migration, ensure we have a default profile
+	if len(cfg.Profiles) == 0 {
+		cfg.Profiles = defaultCLIConfig().Profiles
+		if cfg.Current == "" {
+			cfg.Current = "default"
+		}
+	}
+
 	cfg.ConfigPath = configPath
 	return &cfg, nil
 }
@@ -95,6 +103,13 @@ func ParseCLIConfig(data []byte) (*CLIConfig, error) {
 	// Auto-migrate legacy flat config to profiles for custom config files too
 	if err := cfg.migrateLegacyConfig(); err != nil {
 		return nil, fmt.Errorf("failed to migrate legacy config: %w", err)
+	}
+	// If no profiles exist after migration, ensure we have a default profile
+	if len(cfg.Profiles) == 0 {
+		cfg.Profiles = defaultCLIConfig().Profiles
+		if cfg.Current == "" {
+			cfg.Current = "default"
+		}
 	}
 	return &cfg, nil
 }
@@ -110,6 +125,13 @@ func ParseCLIConfigWithPath(data []byte, configPath string) (*CLIConfig, error) 
 	// Auto-migrate legacy flat config to profiles
 	if err := cfg.migrateLegacyConfig(); err != nil {
 		return nil, fmt.Errorf("failed to migrate legacy config: %w", err)
+	}
+	// If no profiles exist after migration, ensure we have a default profile
+	if len(cfg.Profiles) == 0 {
+		cfg.Profiles = defaultCLIConfig().Profiles
+		if cfg.Current == "" {
+			cfg.Current = "default"
+		}
 	}
 	return &cfg, nil
 }

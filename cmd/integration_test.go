@@ -156,6 +156,7 @@ func TestIntegration_ConfigFilePrecedence(t *testing.T) {
 trino:
   host: from-config-host
   port: 9999
+  user: testuser
 output:
   format: json
 `
@@ -181,7 +182,7 @@ output:
 	}
 }
 
-func TestIntegration_EnvVarOverridesConfig(t *testing.T) {
+func TestIntegration_ConfigOverridesEnvVar(t *testing.T) {
 	binary := buildTestBinary(t)
 
 	// Create a temporary config file
@@ -191,12 +192,13 @@ func TestIntegration_EnvVarOverridesConfig(t *testing.T) {
 trino:
   host: from-config-host
   port: 9999
+  user: testuser
 `
 	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)
 	}
 
-	// Test: Env var overrides config file
+	// Test: Config file overrides env var (env vars are lowest priority)
 	cmd := exec.Command(binary, "--config", configFile, "catalogs")
 	cmd.Env = append(os.Environ(),
 		"HOME="+tempDir,
@@ -206,14 +208,15 @@ trino:
 	output, _ := cmd.CombinedOutput()
 	outputStr := string(output)
 
-	// Verify env host is used and config host is NOT used
-	if !strings.Contains(outputStr, "from-env-host") {
+	// Verify config host is used and env host is NOT used
+	// Precedence: CLI flags > --profile > TRINO_PROFILE > current > default > env vars
+	if !strings.Contains(outputStr, "from-config-host") {
 		t.Logf("Output: %s", outputStr)
-		t.Error("Expected env var host 'from-env-host' to be used, but it wasn't found in output")
+		t.Error("Expected config file host 'from-config-host' to be used, but it wasn't found in output")
 	}
-	if strings.Contains(outputStr, "from-config-host") {
+	if strings.Contains(outputStr, "from-env-host") {
 		t.Logf("Output: %s", outputStr)
-		t.Error("Config file host 'from-config-host' should NOT be used when env var is set")
+		t.Error("Env var host 'from-env-host' should NOT be used when config file is set")
 	}
 }
 
@@ -225,6 +228,8 @@ func TestIntegration_FlagOverridesEnv(t *testing.T) {
 	configFile := tempDir + "/config.yaml"
 	configContent := `trino:
   host: from-config-host
+  port: 9999
+  user: testuser
 `
 	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
 		t.Fatalf("Failed to write config file: %v", err)

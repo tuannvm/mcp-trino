@@ -398,7 +398,9 @@ func runProfileList(cliConfig *cli.CLIConfig) error {
 	fmt.Printf("Available profiles (current: %s):\n", cliConfig.Current)
 	fmt.Println()
 
-	for name, profile := range cliConfig.Profiles {
+	// Use sorted profile names for deterministic output
+	for _, name := range cliConfig.GetProfileNames() {
+		profile := cliConfig.Profiles[name]
 		currentMarker := ""
 		if name == cliConfig.Current {
 			currentMarker = " *"
