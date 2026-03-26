@@ -276,11 +276,7 @@ func (r *REPL) hasMoreInput(query string) bool {
 			}
 		}
 	}
-	if parenBalance > 0 {
-		return true
-	}
-
-	return false
+	return parenBalance > 0
 }
 
 // printHelp displays help information for REPL commands
