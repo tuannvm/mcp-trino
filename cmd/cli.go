@@ -166,28 +166,18 @@ func RunCLIMode() error {
 	if profileToUse == "" {
 		profileToUse = "default"
 	}
-	activeProfileData, err := cliConfig.GetActiveProfile(profileToUse)
+	_, err := cliConfig.GetActiveProfile(profileToUse)
 	if err != nil {
 		// Fail hard if the resolved profile doesn't exist
 		return fmt.Errorf("profile '%s' not found: %w", profileToUse, err)
 	}
 
-	// Validate required fields in the active profile (fail-fast)
-	if activeProfileData.Host == "" {
-		return fmt.Errorf("profile '%s' is missing required field 'host'", profileToUse)
-	}
-	if activeProfileData.Port <= 0 {
-		return fmt.Errorf("profile '%s' has invalid port '%d'", profileToUse, activeProfileData.Port)
-	}
-	if activeProfileData.User == "" {
-		return fmt.Errorf("profile '%s' is missing required field 'user'", profileToUse)
-	}
-
+	// Apply profile to environment (profiles override pre-existing env vars)
 	if err := cliConfig.ApplyToEnv(activeProfile); err != nil {
 		log.Printf("Warning: failed to apply CLI config: %v", err)
 	}
 
-	// Apply CLI flags to environment (flags take precedence over config file)
+	// Apply CLI flags to environment (flags take precedence over everything)
 	if *host != "" {
 		_ = os.Setenv("TRINO_HOST", *host)
 	}
