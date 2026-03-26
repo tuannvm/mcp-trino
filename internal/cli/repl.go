@@ -48,10 +48,6 @@ func (r *REPL) Run(ctx context.Context) error {
 
 		// Read input
 		if !r.scanner.Scan() {
-			// Check for real I/O errors (not just EOF)
-			if err := r.scanner.Err(); err != nil {
-				return fmt.Errorf("input error: %w", err)
-			}
 			// EOF (Ctrl-D)
 			fmt.Println()
 			return nil

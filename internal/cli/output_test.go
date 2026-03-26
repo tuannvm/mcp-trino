@@ -178,7 +178,7 @@ func TestFormatOutput_InvalidFormat(t *testing.T) {
 	}
 }
 
-func TestQueryExecution_ContextCancellation(t *testing.T) {
+func TestQueryExecution_OutputFormattingWithMockClient(t *testing.T) {
 	// Test that query execution respects context cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
