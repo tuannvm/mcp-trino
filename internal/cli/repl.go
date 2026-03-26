@@ -44,11 +44,21 @@ func (r *REPL) Run(ctx context.Context) error {
 	history := []string{}
 
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		// Display prompt
 		fmt.Print(r.prompt)
 
 		// Read input
-		if !r.scanner.Scan() {
+		lineRaw, ok, err := r.scanLine(ctx)
+		if err != nil {
+			return fmt.Errorf("input error: %w", err)
+		}
+		if !ok {
 			// Check for real I/O errors (not just EOF)
 			if err := r.scanner.Err(); err != nil {
 				return fmt.Errorf("input error: %w", err)
@@ -58,7 +68,7 @@ func (r *REPL) Run(ctx context.Context) error {
 			return nil
 		}
 
-		line := strings.TrimSpace(r.scanner.Text())
+		line := strings.TrimSpace(lineRaw)
 
 		// Skip empty lines
 		if line == "" {
@@ -80,7 +90,11 @@ func (r *REPL) Run(ctx context.Context) error {
 		query := line
 		for !strings.HasSuffix(query, ";") && r.hasMoreInput(query) {
 			fmt.Print("... ")
-			if !r.scanner.Scan() {
+			nextLine, ok, err := r.scanLine(ctx)
+			if err != nil {
+				return fmt.Errorf("multiline input error: %w", err)
+			}
+			if !ok {
 				// Check for real I/O errors (not just EOF)
 				if err := r.scanner.Err(); err != nil {
 					return fmt.Errorf("multiline input error: %w", err)
@@ -88,7 +102,6 @@ func (r *REPL) Run(ctx context.Context) error {
 				// EOF (Ctrl-D) during multiline input - execute what we have
 				break
 			}
-			nextLine := r.scanner.Text()
 			query += "\n" + nextLine
 		}
 
@@ -110,6 +123,31 @@ func (r *REPL) Run(ctx context.Context) error {
 			}
 		}
 		fmt.Println()
+	}
+}
+
+func (r *REPL) scanLine(ctx context.Context) (string, bool, error) {
+	type scanResult struct {
+		line string
+		ok   bool
+		err  error
+	}
+
+	resultCh := make(chan scanResult, 1)
+	go func() {
+		ok := r.scanner.Scan()
+		if !ok {
+			resultCh <- scanResult{ok: false, err: r.scanner.Err()}
+			return
+		}
+		resultCh <- scanResult{line: r.scanner.Text(), ok: true}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return "", false, ctx.Err()
+	case result := <-resultCh:
+		return result.line, result.ok, result.err
 	}
 }
 
@@ -179,12 +217,34 @@ func (r *REPL) handleMetaCommand(ctx context.Context, cmd string, history *[]str
 func (r *REPL) hasMoreInput(query string) bool {
 	// If query ends with semicolon, it's complete
 	query = strings.TrimSpace(query)
-	if strings.HasSuffix(query, ";") {
+	if query == "" || strings.HasSuffix(query, ";") {
 		return false
 	}
 
 	// Check for incomplete SQL patterns that require continuation
 	queryLower := strings.ToLower(query)
+	lastLine := queryLower
+	if idx := strings.LastIndex(lastLine, "\n"); idx >= 0 {
+		lastLine = strings.TrimSpace(lastLine[idx+1:])
+	}
+
+	// Common continuation markers
+	if strings.HasSuffix(lastLine, ",") {
+		return true
+	}
+	if strings.HasSuffix(lastLine, "(") {
+		return true
+	}
+
+	operators := []string{
+		"+", "-", "*", "/", "%", "=", "<", ">", "<=", ">=", "<>", "!=",
+		"||", "and", "or", "like", "in", "is", "between",
+	}
+	for _, op := range operators {
+		if strings.HasSuffix(lastLine, " "+op) || lastLine == op {
+			return true
+		}
+	}
 
 	// Check if query ends with incomplete keywords (without trailing space after trim)
 	incompleteEnds := []string{
@@ -194,6 +254,7 @@ func (r *REPL) hasMoreInput(query string) bool {
 		"and", "or", "not",
 		"insert into", "values", "update", "set",
 		"create", "alter", "drop",
+		"with", "with recursive", "as", "union", "intersect", "except",
 	}
 
 	for _, end := range incompleteEnds {
@@ -201,6 +262,22 @@ func (r *REPL) hasMoreInput(query string) bool {
 		if strings.HasSuffix(queryLower, end) {
 			return true
 		}
+	}
+
+	// Unbalanced parentheses indicate unfinished expression or CTE body.
+	parenBalance := 0
+	for _, ch := range query {
+		switch ch {
+		case '(':
+			parenBalance++
+		case ')':
+			if parenBalance > 0 {
+				parenBalance--
+			}
+		}
+	}
+	if parenBalance > 0 {
+		return true
 	}
 
 	return false

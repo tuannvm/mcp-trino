@@ -2,15 +2,40 @@ package cli
 
 import (
 	"context"
+	"io"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/tuannvm/mcp-trino/internal/trino"
 )
 
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	originalStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed to create stdout pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() {
+		os.Stdout = originalStdout
+	}()
+
+	fnErr := fn()
+	_ = w.Close()
+	out, readErr := io.ReadAll(r)
+	_ = r.Close()
+	if readErr != nil {
+		t.Fatalf("failed to read captured stdout: %v", readErr)
+	}
+	return string(out), fnErr
+}
+
 func TestOutputTable_DeterministicColumnOrder(t *testing.T) {
 	tests := []struct {
-		name     string
-		rows     []map[string]interface{}
+		name      string
+		rows      []map[string]interface{}
 		truncated bool
 	}{
 		{
@@ -46,17 +71,28 @@ func TestOutputTable_DeterministicColumnOrder(t *testing.T) {
 				MaxRows:   100,
 			}
 
-			// We can't easily capture stdout without refactoring,
-			// but we can verify it doesn't error and runs consistently
-			err := cmd.outputTable(result)
+			out1, err := captureStdout(t, func() error {
+				return cmd.outputTable(result)
+			})
 			if err != nil {
 				t.Errorf("outputTable() failed: %v", err)
 			}
 
-			// Run again to verify deterministic output (no panics, same error behavior)
-			err2 := cmd.outputTable(result)
+			out2, err2 := captureStdout(t, func() error {
+				return cmd.outputTable(result)
+			})
 			if err != err2 {
 				t.Errorf("outputTable() not deterministic: first err=%v, second err=%v", err, err2)
+			}
+			if out1 != out2 {
+				t.Errorf("outputTable() output mismatch between runs:\nfirst:\n%s\nsecond:\n%s", out1, out2)
+			}
+
+			if tt.name == "single row multiple columns" {
+				expected := "apple  banana  zebra  \n-----  ------  -----  \na      3.14    1      \n"
+				if out1 != expected {
+					t.Errorf("outputTable() exact output mismatch:\nexpected:\n%s\ngot:\n%s", expected, out1)
+				}
 			}
 		})
 	}
@@ -64,8 +100,8 @@ func TestOutputTable_DeterministicColumnOrder(t *testing.T) {
 
 func TestOutputCSV_DeterministicColumnOrder(t *testing.T) {
 	tests := []struct {
-		name     string
-		rows     []map[string]interface{}
+		name      string
+		rows      []map[string]interface{}
 		truncated bool
 	}{
 		{
@@ -94,15 +130,28 @@ func TestOutputCSV_DeterministicColumnOrder(t *testing.T) {
 				MaxRows:   100,
 			}
 
-			err := cmd.outputCSV(result)
+			out1, err := captureStdout(t, func() error {
+				return cmd.outputCSV(result)
+			})
 			if err != nil {
 				t.Errorf("outputCSV() failed: %v", err)
 			}
 
-			// Run again to verify deterministic output
-			err2 := cmd.outputCSV(result)
+			out2, err2 := captureStdout(t, func() error {
+				return cmd.outputCSV(result)
+			})
 			if err != err2 {
 				t.Errorf("outputCSV() not deterministic: first err=%v, second err=%v", err, err2)
+			}
+			if out1 != out2 {
+				t.Errorf("outputCSV() output mismatch between runs:\nfirst:\n%s\nsecond:\n%s", out1, out2)
+			}
+
+			if tt.name == "single row multiple columns" {
+				expected := "\"apple\",\"banana\",\"zebra\"\n\"a\",\"3.14\",\"1\"\n"
+				if out1 != expected {
+					t.Errorf("outputCSV() exact output mismatch:\nexpected:\n%s\ngot:\n%s", expected, out1)
+				}
 			}
 		})
 	}
@@ -135,9 +184,15 @@ func TestFormatOutput_TableFormat(t *testing.T) {
 		MaxRows:   100,
 	}
 
-	err := cmd.formatOutput(result)
+	output, err := captureStdout(t, func() error {
+		return cmd.formatOutput(result)
+	})
 	if err != nil {
 		t.Errorf("formatOutput(table) failed: %v", err)
+	}
+	expected := "col1    col2  \n------  ----  \nvalue1  123   \n"
+	if output != expected {
+		t.Errorf("formatOutput(table) output mismatch:\nexpected:\n%s\ngot:\n%s", expected, output)
 	}
 }
 
@@ -151,9 +206,15 @@ func TestFormatOutput_CSVFormat(t *testing.T) {
 		MaxRows:   100,
 	}
 
-	err := cmd.formatOutput(result)
+	output, err := captureStdout(t, func() error {
+		return cmd.formatOutput(result)
+	})
 	if err != nil {
 		t.Errorf("formatOutput(csv) failed: %v", err)
+	}
+	expected := "\"col1\",\"col2\"\n\"value1\",\"123\"\n"
+	if output != expected {
+		t.Errorf("formatOutput(csv) output mismatch:\nexpected:\n%s\ngot:\n%s", expected, output)
 	}
 }
 
@@ -192,9 +253,13 @@ func TestQueryExecution_ContextCancellation(t *testing.T) {
 	}
 	cmd := NewCommands(client, "table")
 
-	// This should handle the cancelled context gracefully
-	// (implementation depends on how ExecuteQueryWithContext handles cancellation)
-	err := cmd.Query(ctx, "SELECT 1")
-	// We don't enforce a specific error behavior, just that it doesn't hang/panic
-	_ = err // Error is acceptable for cancelled context
+	output, err := captureStdout(t, func() error {
+		return cmd.Query(ctx, "SELECT 1")
+	})
+	if err != nil {
+		t.Fatalf("Query() failed unexpectedly for canceled context test: %v", err)
+	}
+	if !strings.Contains(output, "col") || !strings.Contains(output, "val") {
+		t.Errorf("expected formatted output to include query result, got: %q", output)
+	}
 }

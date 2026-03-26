@@ -22,9 +22,15 @@ type mockTrinoClient struct {
 	schemaError   error
 	tableError    error
 	explainError  error
+	lastQuery     string
+	lastFormat    string
+	lastCatalog   string
+	lastSchema    string
+	lastTable     string
 }
 
 func (m *mockTrinoClient) ExecuteQueryWithContext(ctx context.Context, query string) (*trino.QueryResult, error) {
+	m.lastQuery = query
 	if m.queryError != nil {
 		return nil, m.queryError
 	}
@@ -42,6 +48,7 @@ func (m *mockTrinoClient) ListCatalogsWithContext(ctx context.Context) ([]string
 }
 
 func (m *mockTrinoClient) ListSchemasWithContext(ctx context.Context, catalog string) ([]string, error) {
+	m.lastCatalog = catalog
 	if m.schemaError != nil {
 		return nil, m.schemaError
 	}
@@ -52,6 +59,8 @@ func (m *mockTrinoClient) ListSchemasWithContext(ctx context.Context, catalog st
 }
 
 func (m *mockTrinoClient) ListTablesWithContext(ctx context.Context, catalog, schema string) ([]string, error) {
+	m.lastCatalog = catalog
+	m.lastSchema = schema
 	if m.tableError != nil {
 		return nil, m.tableError
 	}
@@ -63,6 +72,9 @@ func (m *mockTrinoClient) ListTablesWithContext(ctx context.Context, catalog, sc
 }
 
 func (m *mockTrinoClient) GetTableSchemaWithContext(ctx context.Context, catalog, schema, table string) (*trino.QueryResult, error) {
+	m.lastCatalog = catalog
+	m.lastSchema = schema
+	m.lastTable = table
 	if m.schemaError != nil {
 		return nil, m.schemaError
 	}
@@ -70,6 +82,8 @@ func (m *mockTrinoClient) GetTableSchemaWithContext(ctx context.Context, catalog
 }
 
 func (m *mockTrinoClient) ExplainQueryWithContext(ctx context.Context, query string, format string) (*trino.QueryResult, error) {
+	m.lastQuery = query
+	m.lastFormat = format
 	if m.explainError != nil {
 		return nil, m.explainError
 	}
@@ -109,6 +123,9 @@ func TestCommands_Query(t *testing.T) {
 	err := cmd.Query(ctx, "SELECT * FROM test")
 	if err != nil {
 		t.Fatalf("Query() failed: %v", err)
+	}
+	if client.lastQuery != "SELECT * FROM test" {
+		t.Errorf("expected query 'SELECT * FROM test', got %q", client.lastQuery)
 	}
 }
 
@@ -176,6 +193,9 @@ func TestCommands_Schemas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Schemas() failed: %v", err)
 	}
+	if client.lastCatalog != "catalog1" {
+		t.Errorf("expected catalog 'catalog1', got %q", client.lastCatalog)
+	}
 }
 
 func TestCommands_Schemas_DefaultCatalog(t *testing.T) {
@@ -195,6 +215,9 @@ func TestCommands_Schemas_DefaultCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Schemas() with empty catalog failed: %v", err)
 	}
+	if client.lastCatalog != "memory" {
+		t.Errorf("expected default catalog 'memory', got %q", client.lastCatalog)
+	}
 }
 
 func TestCommands_Tables(t *testing.T) {
@@ -210,6 +233,12 @@ func TestCommands_Tables(t *testing.T) {
 	err := cmd.Tables(ctx, "catalog1", "schema1")
 	if err != nil {
 		t.Fatalf("Tables() failed: %v", err)
+	}
+	if client.lastCatalog != "catalog1" {
+		t.Errorf("expected catalog 'catalog1', got %q", client.lastCatalog)
+	}
+	if client.lastSchema != "schema1" {
+		t.Errorf("expected schema 'schema1', got %q", client.lastSchema)
 	}
 }
 
@@ -234,6 +263,12 @@ func TestCommands_Tables_DefaultCatalogSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tables() with empty catalog/schema failed: %v", err)
 	}
+	if client.lastCatalog != "memory" {
+		t.Errorf("expected default catalog 'memory', got %q", client.lastCatalog)
+	}
+	if client.lastSchema != "default" {
+		t.Errorf("expected default schema 'default', got %q", client.lastSchema)
+	}
 }
 
 func TestCommands_Describe(t *testing.T) {
@@ -253,6 +288,9 @@ func TestCommands_Describe(t *testing.T) {
 	err := cmd.Describe(ctx, "catalog.schema.table")
 	if err != nil {
 		t.Fatalf("Describe() failed: %v", err)
+	}
+	if client.lastTable != "catalog.schema.table" {
+		t.Errorf("expected table 'catalog.schema.table', got %q", client.lastTable)
 	}
 }
 
@@ -284,6 +322,12 @@ func TestCommands_Explain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Explain() failed: %v", err)
 	}
+	if client.lastQuery != "SELECT * FROM test" {
+		t.Errorf("expected query 'SELECT * FROM test', got %q", client.lastQuery)
+	}
+	if client.lastFormat != "" {
+		t.Errorf("expected empty explain format, got %q", client.lastFormat)
+	}
 }
 
 func TestCommands_Explain_EmptyQuery(t *testing.T) {
@@ -300,7 +344,7 @@ func TestCommands_Explain_EmptyQuery(t *testing.T) {
 func TestOutputJSON(t *testing.T) {
 	cmd := &Commands{format: "json"}
 	data := map[string]interface{}{
-		"key": "value",
+		"key":    "value",
 		"number": 123,
 	}
 

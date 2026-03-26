@@ -4,7 +4,9 @@ import (
 	"context"
 	"log"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/tuannvm/mcp-trino/internal/config"
 	"github.com/tuannvm/mcp-trino/internal/mcp"
@@ -106,6 +108,9 @@ func main() {
 }
 
 func runMCPServer() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	log.Println("Starting Trino MCP Server...")
 
 	// Initialize Trino configuration
@@ -129,8 +134,12 @@ func runMCPServer() {
 
 	// Test connection by listing catalogs
 	log.Println("Testing Trino connection...")
-	catalogs, err := trinoClient.ListCatalogsWithContext(context.Background())
+	catalogs, err := trinoClient.ListCatalogsWithContext(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			log.Printf("MCP startup canceled: %v", ctx.Err())
+			return
+		}
 		log.Fatalf("Failed to connect to Trino: %v", err)
 	}
 	log.Printf("Connected to Trino server. Available catalogs: %s", strings.Join(catalogs, ", "))
@@ -191,13 +200,17 @@ func shouldRunCLIMode(args []string) bool {
 	return cliCommands[firstPositional]
 }
 
-// isTTY checks if stdin is a terminal (interactive)
-func isTTY() bool {
+var isTTYCheck = func() bool {
 	fi, err := os.Stdin.Stat()
 	if err != nil {
 		return false
 	}
 	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+// isTTY checks if stdin is a terminal (interactive)
+func isTTY() bool {
+	return isTTYCheck()
 }
 
 // hasCLIOnlyFlags checks if args contain CLI-only flags (no subcommand)

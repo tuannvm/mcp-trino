@@ -8,33 +8,19 @@ import (
 	"time"
 )
 
-// getBinaryPath returns the path to the built binary
-func getBinaryPath() string {
-	if os.Getenv("GO_BINARY") != "" {
-		return os.Getenv("GO_BINARY")
-	}
-	return "./bin/mcp-trino"
-}
-
-// buildTestBinary builds the binary for testing if it doesn't exist
-// Set FORCE_REBUILD=1 to force a rebuild even if binary exists
+// buildTestBinary returns GO_BINARY when set, otherwise builds a fresh temp binary.
 func buildTestBinary(t *testing.T) string {
-	binaryPath := getBinaryPath()
-
-	// Check if we should force rebuild
-	forceRebuild := os.Getenv("FORCE_REBUILD") == "1"
-
-	if !forceRebuild {
-		if _, err := os.Stat(binaryPath); err == nil {
-			t.Logf("Using existing binary: %s", binaryPath)
-			return binaryPath
-		}
+	if goBinary := os.Getenv("GO_BINARY"); goBinary != "" {
+		t.Logf("Using GO_BINARY: %s", goBinary)
+		return goBinary
 	}
+
+	binaryPath := t.TempDir() + "/mcp-trino-test"
 
 	// Build the binary
 	// We need to build from the module root, not the cmd directory
 	// When running tests in cmd/, "." refers to the cmd package
-	t.Log("Building test binary...")
+	t.Logf("Building fresh test binary: %s", binaryPath)
 	cmd := exec.Command("go", "build", "-o", binaryPath, ".")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Failed to build test binary: %v\nOutput: %s", err, output)
@@ -102,7 +88,6 @@ func TestIntegration_UnknownArgPreservesMCPMode(t *testing.T) {
 	// We can't test full MCP mode without complex setup, but we can verify
 	// it doesn't crash and shows MCP server startup behavior
 	cmd := exec.Command(binary, "unknown-argument")
-	cmd.Env = append(os.Environ(), "MCP_PROTOCOL_VERSION=1.0")
 
 	// Add a timeout since MCP server will hang waiting for stdin
 	timeout := time.AfterFunc(2*time.Second, func() {
@@ -319,7 +304,7 @@ func TestIntegration_ModeSelection_ExplicitCLI(t *testing.T) {
 	cmd := exec.Command(binary, "--cli", "catalogs")
 	cmd.Env = append(os.Environ(),
 		"MCP_PROTOCOL_VERSION=1.0",
-		"TRINO_HOST=localhost",
+		"TRINO_HOST=no-such-host.invalid",
 	)
 
 	output, err := cmd.CombinedOutput()

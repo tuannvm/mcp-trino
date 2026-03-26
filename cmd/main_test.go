@@ -309,10 +309,18 @@ func TestGetEnv(t *testing.T) {
 }
 
 func TestIsTTY(t *testing.T) {
-	// This is a simple smoke test - we can't easily test TTY detection
-	// in all environments, but we can verify it returns a boolean
-	result := isTTY()
-	if result != true && result != false {
-		t.Errorf("isTTY() returned non-boolean value")
+	original := isTTYCheck
+	t.Cleanup(func() {
+		isTTYCheck = original
+	})
+
+	isTTYCheck = func() bool { return true }
+	if !isTTY() {
+		t.Error("expected isTTY() to return true when injected check returns true")
+	}
+
+	isTTYCheck = func() bool { return false }
+	if isTTY() {
+		t.Error("expected isTTY() to return false when injected check returns false")
 	}
 }

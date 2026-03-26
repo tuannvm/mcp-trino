@@ -324,9 +324,9 @@ Our CI pipeline performs the following checks on all PRs and commits to the main
 
 #### Code Quality
 
-- **Linting**: Using golangci-lint to check for common code issues and style violations
-- **Go Module Verification**: Ensuring go.mod and go.sum are properly maintained
-- **Formatting**: Verifying code is properly formatted with gofmt
+- **Race detection**: `go test -race ./...`
+- **Module tidiness**: `go mod tidy` verification
+- **Linting**: `golangci-lint run`
 
 #### Security
 

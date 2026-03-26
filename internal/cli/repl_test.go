@@ -102,6 +102,36 @@ func TestHasMoreInput(t *testing.T) {
 			query:    "SELECT * FROM test   ",
 			expected: false,
 		},
+		{
+			name:     "Trailing comma continues select list",
+			query:    "SELECT a,",
+			expected: true,
+		},
+		{
+			name:     "Trailing operator requires continuation",
+			query:    "SELECT a +",
+			expected: true,
+		},
+		{
+			name:     "Opening parenthesis requires continuation",
+			query:    "SELECT (",
+			expected: true,
+		},
+		{
+			name:     "Unbalanced parenthesis requires continuation",
+			query:    "WITH cte AS (SELECT 1",
+			expected: true,
+		},
+		{
+			name:     "WITH keyword requires continuation",
+			query:    "WITH",
+			expected: true,
+		},
+		{
+			name:     "With complete expression does not continue",
+			query:    "WITH cte AS (SELECT 1) SELECT * FROM cte",
+			expected: false,
+		},
 	}
 
 	repl := &REPL{}
