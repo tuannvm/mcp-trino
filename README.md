@@ -230,7 +230,6 @@ export TRINO_CATALOG=hive
 export TRINO_SCHEMA=analytics
 export TRINO_SSL=true
 ```
-```
 
 **REPL Meta-Commands** (in interactive mode):
 - `\help` - Show help

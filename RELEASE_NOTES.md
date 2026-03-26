@@ -202,13 +202,6 @@ profiles:
 output:
   format: table
 ```
-  schema: analytics
-  ssl:
-    enabled: true
-    insecure: false
-output:
-  format: table
-```
 
 ### Output Formats
 ```bash
@@ -301,7 +294,7 @@ If critical issues arise:
 
 ## Support
 
-- **Documentation:** See README.md and internal/cli/TESTING.md
+- **Documentation:** See README.md and docs/ directory
 - **Issues:** Report via GitHub issues
 - **Contributing:** Pull requests welcome
 
