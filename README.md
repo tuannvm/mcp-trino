@@ -83,10 +83,14 @@ graph TB
 - **AI Clients**: Various MCP-compatible applications
 - **Authentication**: Optional OAuth 2.0 with OIDC providers
 - **MCP Server**: Go-based server with dual transport support
+- **CLI Mode**: Interactive SQL shell for direct Trino access (psql-like)
 - **Data Layer**: Trino cluster connecting to multiple data sources
 
 ## Features
 
+- ✅ **Dual Mode**: Works as both MCP server AND interactive CLI
+  - **CLI Mode**: psql-like interactive SQL shell for direct Trino access
+  - **MCP Mode**: Full MCP server for AI assistant integration
 - ✅ MCP server implementation in Go
 - ✅ Trino SQL query execution through MCP tools
 - ✅ Catalog, schema, and table discovery
@@ -125,6 +129,73 @@ mcp-trino
 ```
 
 For production deployment with OAuth, see [Deployment Guide](docs/deployment.md) and [OAuth Architecture](docs/oauth.md).
+
+## CLI Mode
+
+mcp-trino can be used as an interactive CLI similar to `psql` or the Trino CLI:
+
+```bash
+# Interactive REPL mode
+mcp-trino --interactive
+
+# Execute a query directly
+mcp-trino query "SELECT * FROM my_table LIMIT 10"
+
+# List catalogs, schemas, tables
+mcp-trino catalogs
+mcp-trino schemas my_catalog
+mcp-trino tables my_catalog my_schema
+
+# Describe a table
+mcp-trino describe my_catalog.my_schema.my_table
+
+# Explain a query
+mcp-trino explain "SELECT COUNT(*) FROM my_table"
+
+# Output formats
+mcp-trino --format json query "SELECT 1"
+mcp-trino --format csv query "SELECT 1"
+mcp-trino --format table query "SELECT 1"  # default
+```
+
+**Configuration File** (~/.config/trino/config.yaml):
+
+```yaml
+trino:
+  host: trino.example.com
+  port: 443
+  user: myuser
+  password: mypass
+  catalog: hive
+  schema: analytics
+  ssl:
+    enabled: true
+    insecure: false
+output:
+  format: table
+```
+
+**Environment Variables** (override config file):
+
+```bash
+export TRINO_HOST=trino.example.com
+export TRINO_PORT=443
+export TRINO_USER=myuser
+export TRINO_PASSWORD=mypass
+export TRINO_CATALOG=hive
+export TRINO_SCHEMA=analytics
+export TRINO_SSL=true
+```
+
+**REPL Meta-Commands** (in interactive mode):
+- `\help` - Show help
+- `\quit`, `\exit`, `\q` - Exit REPL
+- `\history` - Show command history
+- `\catalogs` - List all catalogs
+- `\schemas [catalog]` - List schemas
+- `\tables [catalog schema]` - List tables
+- `\describe <table>` - Describe table
+- `\format <table|json|csv>` - Change output format
 
 ## Usage
 

@@ -28,15 +28,15 @@ type CLIConfig struct {
 	} `yaml:"output"`
 }
 
-// LoadCLIConfig loads the CLI configuration from ~/.mcp-trino/config.yaml
+// LoadCLIConfig loads the CLI configuration from ~/.config/trino/config.yaml
 func LoadCLIConfig() (*CLIConfig, error) {
-	// Use home directory directly for ~/.mcp-trino/config.yaml
+	// Use XDG config directory: ~/.config/trino/config.yaml
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	configPath := filepath.Join(homeDir, ".mcp-trino", "config.yaml")
+	configPath := filepath.Join(homeDir, ".config", "trino", "config.yaml")
 
 	// If config doesn't exist, return default config
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
@@ -65,15 +65,15 @@ func ParseCLIConfig(data []byte) (*CLIConfig, error) {
 	return &cfg, nil
 }
 
-// SaveCLIConfig saves the CLI configuration to ~/.mcp-trino/config.yaml
+// SaveCLIConfig saves the CLI configuration to ~/.config/trino/config.yaml
 func SaveCLIConfig(cfg *CLIConfig) error {
-	// Use home directory directly for ~/.mcp-trino/config.yaml
+	// Use XDG config directory: ~/.config/trino/config.yaml
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	configPath := filepath.Join(homeDir, ".mcp-trino", "config.yaml")
+	configPath := filepath.Join(homeDir, ".config", "trino", "config.yaml")
 
 	// Create config directory if it doesn't exist
 	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
@@ -145,6 +145,6 @@ func setEnvIfAbsent(key, value string) {
 		return
 	}
 	if _, exists := os.LookupEnv(key); !exists {
-		os.Setenv(key, value)
+		_ = os.Setenv(key, value)
 	}
 }

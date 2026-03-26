@@ -5,19 +5,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/tuannvm/mcp-trino/internal/trino"
 )
 
+// TrinoClient interface defines the methods we need from trino.Client
+// This allows us to use mock clients in tests
+type TrinoClient interface {
+	ExecuteQueryWithContext(ctx context.Context, query string) (*trino.QueryResult, error)
+	ListCatalogsWithContext(ctx context.Context) ([]string, error)
+	ListSchemasWithContext(ctx context.Context, catalog string) ([]string, error)
+	ListTablesWithContext(ctx context.Context, catalog, schema string) ([]string, error)
+	GetTableSchemaWithContext(ctx context.Context, catalog, schema, table string) (*trino.QueryResult, error)
+	ExplainQueryWithContext(ctx context.Context, query string, format string) (*trino.QueryResult, error)
+	Close() error
+}
+
 // Commands holds the Trino client for executing CLI commands
 type Commands struct {
-	client *trino.Client
+	client TrinoClient
 	format string // output format: table, json, csv
 }
 
 // NewCommands creates a new CLI commands handler
-func NewCommands(client *trino.Client, format string) *Commands {
+func NewCommands(client TrinoClient, format string) *Commands {
 	if format == "" {
 		format = "table"
 	}
@@ -227,11 +240,12 @@ func (c *Commands) outputCSV(results interface{}) error {
 		return nil
 	}
 
-	// Extract column names from the first row
+	// Extract column names from the first row and sort for deterministic output
 	columns := make([]string, 0, len(queryResults.Rows[0]))
 	for col := range queryResults.Rows[0] {
 		columns = append(columns, col)
 	}
+	sort.Strings(columns)
 
 	// Write CSV header
 	for i, col := range columns {
@@ -273,11 +287,12 @@ func (c *Commands) outputTable(results interface{}) error {
 		return nil
 	}
 
-	// Extract column names from the first row
+	// Extract column names from the first row and sort for deterministic output
 	columns := make([]string, 0, len(queryResults.Rows[0]))
 	for col := range queryResults.Rows[0] {
 		columns = append(columns, col)
 	}
+	sort.Strings(columns)
 
 	// Calculate column widths
 	colWidths := make([]int, len(columns))

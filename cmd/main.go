@@ -185,12 +185,13 @@ func shouldRunCLIMode(args []string) bool {
 		if strings.HasPrefix(arg, "-") {
 			continue
 		}
-		// Check if it's a CLI command
+		// Only return true if it's a known CLI command
+		// Unknown positional args should NOT trigger CLI mode (preserves MCP compatibility)
 		if cliCommands[arg] {
 			return true
 		}
-		// If we see a non-flag, non-command argument, it's likely a CLI invocation
-		return true
+		// Unknown positional argument - don't assume CLI mode
+		// This preserves backward compatibility for MCP integrations
 	}
 
 	return false

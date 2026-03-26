@@ -20,7 +20,11 @@ type REPL struct {
 func NewREPL(commands *Commands, catalog, schema string) *REPL {
 	prompt := "trino>"
 	if catalog != "" {
-		prompt = fmt.Sprintf("%s.%s>", catalog, schema)
+		if schema != "" {
+			prompt = fmt.Sprintf("%s.%s>", catalog, schema)
+		} else {
+			prompt = fmt.Sprintf("%s>", catalog)
+		}
 	}
 
 	return &REPL{
@@ -44,6 +48,10 @@ func (r *REPL) Run(ctx context.Context) error {
 
 		// Read input
 		if !r.scanner.Scan() {
+			// Check for real I/O errors (not just EOF)
+			if err := r.scanner.Err(); err != nil {
+				return fmt.Errorf("input error: %w", err)
+			}
 			// EOF (Ctrl-D)
 			fmt.Println()
 			return nil
@@ -69,9 +77,14 @@ func (r *REPL) Run(ctx context.Context) error {
 
 		// Handle multi-line queries
 		query := line
-		for strings.HasSuffix(query, ";") == false && r.hasMoreInput(query) {
+		for !strings.HasSuffix(query, ";") && r.hasMoreInput(query) {
 			fmt.Print("... ")
 			if !r.scanner.Scan() {
+				// Check for real I/O errors (not just EOF)
+				if err := r.scanner.Err(); err != nil {
+					return fmt.Errorf("multiline input error: %w", err)
+				}
+				// EOF (Ctrl-D) during multiline input - execute what we have
 				break
 			}
 			nextLine := r.scanner.Text()

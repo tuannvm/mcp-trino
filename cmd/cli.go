@@ -137,28 +137,39 @@ func RunCLIMode() error {
 
 	// Apply CLI flags to environment (flags take precedence over config file)
 	if *host != "" {
-		os.Setenv("TRINO_HOST", *host)
+		_ = os.Setenv("TRINO_HOST", *host)
 	}
 	if *port != 0 {
-		os.Setenv("TRINO_PORT", fmt.Sprintf("%d", *port))
+		_ = os.Setenv("TRINO_PORT", fmt.Sprintf("%d", *port))
 	}
 	if *user != "" {
-		os.Setenv("TRINO_USER", *user)
+		_ = os.Setenv("TRINO_USER", *user)
 	}
 	if *password != "" {
-		os.Setenv("TRINO_PASSWORD", *password)
+		_ = os.Setenv("TRINO_PASSWORD", *password)
 	}
 	if *catalog != "" {
-		os.Setenv("TRINO_CATALOG", *catalog)
+		_ = os.Setenv("TRINO_CATALOG", *catalog)
 	}
 	if *schema != "" {
-		os.Setenv("TRINO_SCHEMA", *schema)
+		_ = os.Setenv("TRINO_SCHEMA", *schema)
 	}
 
 	// Determine output format
 	outputFormat := *format
 	if outputFormat == "" {
 		outputFormat = cliConfig.GetOutputFormat()
+	}
+
+	// Validate output format
+	validFormats := map[string]bool{"table": true, "json": true, "csv": true}
+	if outputFormat != "" && !validFormats[outputFormat] {
+		return fmt.Errorf("invalid output format '%s': must be one of table, json, csv", outputFormat)
+	}
+
+	// Default to table if empty
+	if outputFormat == "" {
+		outputFormat = "table"
 	}
 
 	// Initialize Trino configuration
