@@ -330,6 +330,30 @@ func TestCommands_Explain(t *testing.T) {
 	}
 }
 
+func TestCommands_Explain_DeterministicOutputOrder(t *testing.T) {
+	ctx := context.Background()
+	client := &mockTrinoClient{
+		explainResult: &trino.QueryResult{
+			Rows: []map[string]interface{}{
+				{"zeta": "third", "alpha": "first", "beta": "second"},
+			},
+		},
+	}
+	cmd := NewCommands(client, "table")
+
+	output, err := captureStdout(t, func() error {
+		return cmd.Explain(ctx, "SELECT 1", "")
+	})
+	if err != nil {
+		t.Fatalf("Explain() failed: %v", err)
+	}
+
+	expected := "Query Plan for: SELECT 1\n\nfirst\nsecond\nthird\n"
+	if output != expected {
+		t.Fatalf("unexpected explain output:\nexpected:\n%s\ngot:\n%s", expected, output)
+	}
+}
+
 func TestCommands_Explain_EmptyQuery(t *testing.T) {
 	ctx := context.Background()
 	client := &mockTrinoClient{}

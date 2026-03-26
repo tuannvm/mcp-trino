@@ -43,7 +43,7 @@ var (
 	}
 
 	// Pre-compiled write operation patterns
-	writeOpPatterns     []*regexp.Regexp
+	writeOpPatterns      []*regexp.Regexp
 	writeOpsExceptCreate []*regexp.Regexp
 
 	// Pre-compiled sanitization patterns
@@ -52,6 +52,7 @@ var (
 	backtickIdent      = regexp.MustCompile("`[^`]*`")
 	singleLineComment  = regexp.MustCompile(`--[^\r\n]*`)
 	multiLineComment   = regexp.MustCompile(`/\*[^*]*\*+(?:[^/*][^*]*\*+)*/`)
+	safeIdentifierPart = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
 func init() {
@@ -462,7 +463,12 @@ func (c *Client) ListSchemasWithContext(ctx context.Context, catalog string) ([]
 		catalog = c.config.Catalog
 	}
 
-	query := fmt.Sprintf("SHOW SCHEMAS FROM %s", catalog)
+	qualifiedCatalog, err := formatIdentifier(catalog)
+	if err != nil {
+		return nil, fmt.Errorf("invalid catalog identifier %q: %w", catalog, err)
+	}
+
+	query := fmt.Sprintf("SHOW SCHEMAS FROM %s", qualifiedCatalog)
 	result, err := c.ExecuteQueryWithContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -497,7 +503,16 @@ func (c *Client) ListTablesWithContext(ctx context.Context, catalog, schema stri
 		schema = c.config.Schema
 	}
 
-	query := fmt.Sprintf("SHOW TABLES FROM %s.%s", catalog, schema)
+	qualifiedCatalog, err := formatIdentifier(catalog)
+	if err != nil {
+		return nil, fmt.Errorf("invalid catalog identifier %q: %w", catalog, err)
+	}
+	qualifiedSchema, err := formatIdentifier(schema)
+	if err != nil {
+		return nil, fmt.Errorf("invalid schema identifier %q: %w", schema, err)
+	}
+
+	query := fmt.Sprintf("SHOW TABLES FROM %s.%s", qualifiedCatalog, qualifiedSchema)
 	result, err := c.ExecuteQueryWithContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -557,7 +572,20 @@ func (c *Client) GetTableSchemaWithContext(ctx context.Context, catalog, schema,
 	}
 
 	// Build and execute query with resolved parameters
-	query := fmt.Sprintf("DESCRIBE %s.%s.%s", catalog, schema, table)
+	qualifiedCatalog, err := formatIdentifier(catalog)
+	if err != nil {
+		return nil, fmt.Errorf("invalid catalog identifier %q: %w", catalog, err)
+	}
+	qualifiedSchema, err := formatIdentifier(schema)
+	if err != nil {
+		return nil, fmt.Errorf("invalid schema identifier %q: %w", schema, err)
+	}
+	qualifiedTable, err := formatIdentifier(table)
+	if err != nil {
+		return nil, fmt.Errorf("invalid table identifier %q: %w", table, err)
+	}
+
+	query := fmt.Sprintf("DESCRIBE %s.%s.%s", qualifiedCatalog, qualifiedSchema, qualifiedTable)
 	return c.ExecuteQueryWithContext(ctx, query)
 }
 
@@ -602,6 +630,19 @@ func sanitizeConnectionError(err error, password string) error {
 	}
 
 	return fmt.Errorf("%s", errStr)
+}
+
+func formatIdentifier(identifier string) (string, error) {
+	if identifier == "" {
+		return "", fmt.Errorf("identifier cannot be empty")
+	}
+	if strings.Contains(identifier, ".") {
+		return "", fmt.Errorf("identifier must not contain '.'")
+	}
+	if !safeIdentifierPart.MatchString(identifier) {
+		return "", fmt.Errorf("identifier must match %q", safeIdentifierPart.String())
+	}
+	return `"` + identifier + `"`, nil
 }
 
 // filterCatalogs filters a list of catalogs based on the allowlist configuration

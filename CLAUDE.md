@@ -24,7 +24,7 @@ The tool automatically detects which mode to use based on arguments and environm
 ```bash
 # Core development
 make build           # Build binary to ./bin/mcp-trino
-make test            # Run unit tests with race detection
+make test            # Run unit tests
 make run-dev         # Run from source code (go run ./cmd)
 make run             # Run built binary
 make clean           # Clean build artifacts
@@ -97,7 +97,7 @@ OAuth 2.1 authentication is provided by the external **[oauth-mcp-proxy](https:/
 
 - **STDIO Transport**: Direct MCP client integration (default)
 - **HTTP Transport**: StreamableHTTP support on `/mcp` endpoint with SSE backward compatibility on `/sse` endpoint
-- **Status Endpoint**: GET `/` returns server status and version
+- **Status Endpoint**: GET `/status` returns server status and version
 
 ### SQL Security Architecture
 
@@ -122,7 +122,7 @@ All tools return JSON-formatted responses and handle parameter validation:
 - `TRINO_HOST`, `TRINO_PORT`, `TRINO_USER`, `TRINO_PASSWORD`
 - `TRINO_SCHEME` (http/https), `TRINO_SSL`, `TRINO_SSL_INSECURE`
 - `TRINO_ALLOW_WRITE_QUERIES` (default: false for security)
-- `TRINO_QUERY_TIMEOUT` (default: 30 seconds, validated > 0)
+- `TRINO_QUERY_TIMEOUT` (default: 300 seconds, validated > 0)
 
 **MCP Server:**
 - `MCP_TRANSPORT` (stdio/http), `MCP_PORT` (default: 8080), `MCP_HOST`
@@ -137,7 +137,7 @@ All tools return JSON-formatted responses and handle parameter validation:
 
 Key defaults and behaviors:
 - HTTPS scheme forces SSL=true regardless of TRINO_SSL setting
-- Invalid timeout values fall back to 30 seconds with warning
+- Invalid timeout values fall back to 300 seconds with warning
 - Connection pool: 10 max open, 5 max idle, 5min max lifetime
 
 ## CI/CD Pipeline
@@ -156,7 +156,7 @@ The GitHub Actions workflow (`.github/workflows/build.yml`) includes:
 - Security results uploaded to GitHub Security tab
 
 **Testing** (`test` job):
-- Race detection enabled (`go test -race`)
+- Standard test execution (`go test ./...`)
 - Code coverage with atomic mode
 - Coverage uploaded to Codecov
 
@@ -171,7 +171,7 @@ The GitHub Actions workflow (`.github/workflows/build.yml`) includes:
 - Docker Compose setup includes real Trino server  
 - Set `MCP_TRANSPORT=http` and test StreamableHTTP endpoint at `http://localhost:8080/mcp`
 - Test legacy SSE endpoint at `http://localhost:8080/sse` for backward compatibility
-- Test status endpoint at `GET /`
+- Test status endpoint at `GET /status`
 
 ## Build and Release
 

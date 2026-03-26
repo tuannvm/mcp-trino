@@ -54,7 +54,7 @@ func (r *REPL) Run(ctx context.Context) error {
 		fmt.Print(r.prompt)
 
 		// Read input
-		lineRaw, ok, err := r.scanLine(ctx)
+		lineRaw, ok, err := r.scanLine()
 		if err != nil {
 			return fmt.Errorf("input error: %w", err)
 		}
@@ -90,7 +90,7 @@ func (r *REPL) Run(ctx context.Context) error {
 		query := line
 		for !strings.HasSuffix(query, ";") && r.hasMoreInput(query) {
 			fmt.Print("... ")
-			nextLine, ok, err := r.scanLine(ctx)
+			nextLine, ok, err := r.scanLine()
 			if err != nil {
 				return fmt.Errorf("multiline input error: %w", err)
 			}
@@ -126,29 +126,12 @@ func (r *REPL) Run(ctx context.Context) error {
 	}
 }
 
-func (r *REPL) scanLine(ctx context.Context) (string, bool, error) {
-	type scanResult struct {
-		line string
-		ok   bool
-		err  error
+func (r *REPL) scanLine() (string, bool, error) {
+	ok := r.scanner.Scan()
+	if !ok {
+		return "", false, r.scanner.Err()
 	}
-
-	resultCh := make(chan scanResult, 1)
-	go func() {
-		ok := r.scanner.Scan()
-		if !ok {
-			resultCh <- scanResult{ok: false, err: r.scanner.Err()}
-			return
-		}
-		resultCh <- scanResult{line: r.scanner.Text(), ok: true}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return "", false, ctx.Err()
-	case result := <-resultCh:
-		return result.line, result.ok, result.err
-	}
+	return r.scanner.Text(), true, nil
 }
 
 // ErrExitREPL is returned when the user wants to exit the REPL

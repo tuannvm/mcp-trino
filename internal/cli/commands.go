@@ -200,8 +200,14 @@ func (c *Commands) Explain(ctx context.Context, query string, formatOpt string) 
 	// Print the query plan from the result rows
 	fmt.Printf("Query Plan for: %s\n\n", query)
 	for _, row := range result.Rows {
-		// EXPLAIN results typically have a single column with the plan
-		for _, val := range row {
+		// Keep deterministic output ordering for multi-column explain rows.
+		columns := make([]string, 0, len(row))
+		for col := range row {
+			columns = append(columns, col)
+		}
+		sort.Strings(columns)
+		for _, col := range columns {
+			val := row[col]
 			fmt.Printf("%v\n", val)
 		}
 	}
@@ -335,4 +341,3 @@ func (c *Commands) outputTable(results interface{}) error {
 	}
 	return nil
 }
-

@@ -479,10 +479,10 @@ func TestPrecompiledRegexConsistency(t *testing.T) {
 		{"REVOKE SELECT ON t FROM user1", false},
 
 		// Edge cases
-		{"SELECT*FROM users", true},       // word boundary handles this
-		{"SHOWTABLES", false},               // word boundary blocks
+		{"SELECT*FROM users", true},           // word boundary handles this
+		{"SHOWTABLES", false},                 // word boundary blocks
 		{"SELECT 1; DROP TABLE users", false}, // semicolon blocked
-		{"\n  SELECT * FROM t\n", true},    // newlines normalized
+		{"\n  SELECT * FROM t\n", true},       // newlines normalized
 	}
 
 	for _, tt := range queries {
@@ -568,6 +568,41 @@ func TestMaxRowsConfigPropagation(t *testing.T) {
 			}
 			if client.config.MaxRows != tt.expected {
 				t.Errorf("MaxRows = %d, want %d", client.config.MaxRows, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFormatIdentifier(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		want      string
+		wantError bool
+	}{
+		{name: "Simple", input: "hive", want: `"hive"`},
+		{name: "Underscore and digits", input: "analytics_2026", want: `"analytics_2026"`},
+		{name: "Empty", input: "", wantError: true},
+		{name: "Contains dot", input: "hive.default", wantError: true},
+		{name: "Contains space", input: "bad name", wantError: true},
+		{name: "Starts with digit", input: "1catalog", wantError: true},
+		{name: "Injection attempt", input: `hive; DROP TABLE users`, wantError: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := formatIdentifier(tt.input)
+			if tt.wantError {
+				if err == nil {
+					t.Fatalf("formatIdentifier(%q) expected error, got nil", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("formatIdentifier(%q) unexpected error: %v", tt.input, err)
+			}
+			if got != tt.want {
+				t.Fatalf("formatIdentifier(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
