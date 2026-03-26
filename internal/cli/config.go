@@ -310,32 +310,33 @@ func (c *CLIConfig) SetCurrent(name string) error {
 	return SaveCLIConfig(c)
 }
 
-// ApplyToEnv applies CLI config to environment variables (only if not already set)
-// This now applies the active profile based on precedence
+// ApplyToEnv applies CLI config to environment variables
+// This applies the active profile values to env vars (profiles override existing env vars)
+// CLI flags will later override these env vars (highest priority)
 func (c *CLIConfig) ApplyToEnv(profileName string) error {
 	profile, err := c.GetActiveProfile(profileName)
 	if err != nil {
 		return err
 	}
 
-	setEnvIfAbsent("TRINO_HOST", profile.Host)
+	setEnvIfValue("TRINO_HOST", profile.Host)
 	// Only set port if it's a valid non-zero value
 	if profile.Port > 0 {
-		setEnvIfAbsent("TRINO_PORT", fmt.Sprintf("%d", profile.Port))
+		setEnvIfValue("TRINO_PORT", fmt.Sprintf("%d", profile.Port))
 	}
-	setEnvIfAbsent("TRINO_USER", profile.User)
-	setEnvIfAbsent("TRINO_PASSWORD", profile.Password)
-	setEnvIfAbsent("TRINO_CATALOG", profile.Catalog)
-	setEnvIfAbsent("TRINO_SCHEMA", profile.Schema)
+	setEnvIfValue("TRINO_USER", profile.User)
+	setEnvIfValue("TRINO_PASSWORD", profile.Password)
+	setEnvIfValue("TRINO_CATALOG", profile.Catalog)
+	setEnvIfValue("TRINO_SCHEMA", profile.Schema)
 	if profile.Source != "" {
-		setEnvIfAbsent("TRINO_SOURCE", profile.Source)
+		setEnvIfValue("TRINO_SOURCE", profile.Source)
 	}
 	// Only set SSL flags if explicitly configured in the YAML (non-nil pointer)
 	if profile.SSL.Enabled != nil {
-		setEnvIfAbsent("TRINO_SSL", fmt.Sprintf("%t", *profile.SSL.Enabled))
+		setEnvIfValue("TRINO_SSL", fmt.Sprintf("%t", *profile.SSL.Enabled))
 	}
 	if profile.SSL.Insecure {
-		setEnvIfAbsent("TRINO_SSL_INSECURE", "true")
+		setEnvIfValue("TRINO_SSL_INSECURE", "true")
 	}
 	return nil
 }
@@ -348,12 +349,11 @@ func (c *CLIConfig) GetOutputFormat() string {
 	return c.Output.Format
 }
 
-// setEnvIfAbsent sets an environment variable only if it's not already set
-func setEnvIfAbsent(key, value string) {
+// setEnvIfValue sets an environment variable to the given value (if non-empty)
+// This overrides any existing value, allowing profiles to take precedence over env vars
+func setEnvIfValue(key, value string) {
 	if value == "" {
 		return
 	}
-	if _, exists := os.LookupEnv(key); !exists {
-		_ = os.Setenv(key, value)
-	}
+	_ = os.Setenv(key, value)
 }

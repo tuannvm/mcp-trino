@@ -166,9 +166,21 @@ func RunCLIMode() error {
 	if profileToUse == "" {
 		profileToUse = "default"
 	}
-	if _, err := cliConfig.GetActiveProfile(profileToUse); err != nil {
+	activeProfileData, err := cliConfig.GetActiveProfile(profileToUse)
+	if err != nil {
 		// Fail hard if the resolved profile doesn't exist
 		return fmt.Errorf("profile '%s' not found: %w", profileToUse, err)
+	}
+
+	// Validate required fields in the active profile (fail-fast)
+	if activeProfileData.Host == "" {
+		return fmt.Errorf("profile '%s' is missing required field 'host'", profileToUse)
+	}
+	if activeProfileData.Port <= 0 {
+		return fmt.Errorf("profile '%s' has invalid port '%d'", profileToUse, activeProfileData.Port)
+	}
+	if activeProfileData.User == "" {
+		return fmt.Errorf("profile '%s' is missing required field 'user'", profileToUse)
 	}
 
 	if err := cliConfig.ApplyToEnv(activeProfile); err != nil {
