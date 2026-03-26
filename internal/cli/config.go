@@ -356,9 +356,8 @@ func (c *CLIConfig) ApplyToEnv(profileName string) error {
 	// Only set SSL flags if explicitly configured in the YAML (non-nil pointer)
 	if profile.SSL.Enabled != nil {
 		setEnvIfValue("TRINO_SSL", fmt.Sprintf("%t", *profile.SSL.Enabled))
-	}
-	if profile.SSL.Insecure {
-		setEnvIfValue("TRINO_SSL_INSECURE", "true")
+		// When SSL is configured, also set INSECURE to match profile (overrides env var)
+		setEnvIfValue("TRINO_SSL_INSECURE", fmt.Sprintf("%t", profile.SSL.Insecure))
 	}
 	return nil
 }
