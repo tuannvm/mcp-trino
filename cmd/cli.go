@@ -32,6 +32,16 @@ func cleanArgs(args []string) []string {
 	return cleaned
 }
 
+// hasFlags checks if any argument appears to be a flag (starts with -)
+func hasFlags(args []string) bool {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") {
+			return true
+		}
+	}
+	return false
+}
+
 // RunCLIMode executes the CLI mode
 func RunCLIMode() error {
 	// Strip mode selection flags (--cli, --mcp) from args before parsing
@@ -245,21 +255,66 @@ func RunCLIMode() error {
 		return commands.Catalogs(ctx)
 
 	case "schemas":
-		catalog := ""
-		if len(commandArgs) > 0 {
-			catalog = commandArgs[0]
+		// Create a subcommand flag set for schemas-specific flags
+		schemasFlagSet := flag.NewFlagSet("schemas", flag.ContinueOnError)
+		schemasCatalog := schemasFlagSet.String("catalog", "", "Catalog name")
+		// Parse the commandArgs as flags
+		if err := schemasFlagSet.Parse(commandArgs); err != nil {
+			// If flag parsing failed and no flags were present, treat as positional
+			if !hasFlags(commandArgs) && len(commandArgs) > 0 {
+				return commands.Schemas(ctx, commandArgs[0])
+			}
+			return fmt.Errorf("schemas command error: %w", err)
 		}
-		return commands.Schemas(ctx, catalog)
+		// Use flag value if set, otherwise use remaining positional arg
+		if *schemasCatalog != "" {
+			return commands.Schemas(ctx, *schemasCatalog)
+		}
+		// Use positional argument if provided
+		remainingArgs := schemasFlagSet.Args()
+		if len(remainingArgs) > 0 {
+			return commands.Schemas(ctx, remainingArgs[0])
+		}
+		return commands.Schemas(ctx, "")
 
 	case "tables":
-		catalog, schema := "", ""
-		if len(commandArgs) > 0 {
-			catalog = commandArgs[0]
+		// Create a subcommand flag set for tables-specific flags
+		tablesFlagSet := flag.NewFlagSet("tables", flag.ContinueOnError)
+		tablesCatalog := tablesFlagSet.String("catalog", "", "Catalog name")
+		tablesSchema := tablesFlagSet.String("schema", "", "Schema name")
+		// Parse the commandArgs as flags
+		if err := tablesFlagSet.Parse(commandArgs); err != nil {
+			// If flag parsing failed and no flags were present, treat as positional
+			if !hasFlags(commandArgs) {
+				if len(commandArgs) >= 2 {
+					return commands.Tables(ctx, commandArgs[0], commandArgs[1])
+				}
+				if len(commandArgs) == 1 {
+					return commands.Tables(ctx, commandArgs[0], "")
+				}
+				return commands.Tables(ctx, "", "")
+			}
+			return fmt.Errorf("tables command error: %w", err)
 		}
-		if len(commandArgs) > 1 {
-			schema = commandArgs[1]
+		// Use flag values if set, otherwise use remaining positional args
+		remainingArgs := tablesFlagSet.Args()
+		finalCatalog, finalSchema := "", ""
+		if *tablesCatalog != "" {
+			finalCatalog = *tablesCatalog
 		}
-		return commands.Tables(ctx, catalog, schema)
+		if *tablesSchema != "" {
+			finalSchema = *tablesSchema
+		}
+		// Positional args fill in missing values in order
+		posIndex := 0
+		if finalCatalog == "" && len(remainingArgs) > posIndex {
+			finalCatalog = remainingArgs[posIndex]
+			posIndex++
+		}
+		if finalSchema == "" && len(remainingArgs) > posIndex {
+			finalSchema = remainingArgs[posIndex]
+		}
+		return commands.Tables(ctx, finalCatalog, finalSchema)
 
 	case "describe":
 		if len(commandArgs) == 0 {
