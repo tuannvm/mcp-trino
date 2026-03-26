@@ -197,6 +197,17 @@ func RunCLIMode() error {
 		_ = os.Setenv("TRINO_SCHEMA", *schema)
 	}
 
+	// Validate required fields after precedence is applied (profile + CLI flags)
+	// This ensures fail-fast behavior for incomplete configuration
+	if os.Getenv("TRINO_HOST") == "" {
+		return fmt.Errorf("missing required configuration: host not set (provide via --host flag, profile, or TRINO_HOST env var)")
+	}
+	if os.Getenv("TRINO_USER") == "" {
+		return fmt.Errorf("missing required configuration: user not set (provide via --user flag, profile, or TRINO_USER env var)")
+	}
+	// Port is optional in config but TrinoConfig will use default 8080 if not set
+	// We allow this to pass since it's a reasonable default
+
 	// Determine output format
 	outputFormat := *format
 	if outputFormat == "" {
