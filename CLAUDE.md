@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**mcp-trino** is a Model Context Protocol (MCP) server that enables AI assistants to interact with Trino's distributed SQL query engine. It acts as a bridge between AI applications and Trino databases, allowing conversational access to data analytics through standardized MCP tools.
+**mcp-trino** is a dual-purpose tool that works as both:
+1. **MCP Server** - Enables AI assistants to interact with Trino's distributed SQL query engine through standardized MCP tools
+2. **Interactive CLI** - psql-like REPL for direct human access to Trino databases
+
+The tool automatically detects which mode to use based on arguments and environment.
 
 ## Tech Stack
 
@@ -40,32 +44,41 @@ make pack-dxt           # Package DXT extension
 go test ./internal/config    # Test configuration package
 go test ./internal/trino     # Test Trino client package
 go test ./internal/mcp       # Test MCP handlers package
+go test ./internal/cli       # Test CLI commands and REPL
+go test ./cmd                # Test mode detection and integration
 ```
 
 ## Architecture
 
 ### Core Components
 
-1. **Main Entry Point** (`cmd/main.go`): 
-   - Server initialization and Trino connection testing
+1. **Main Entry Point** (`cmd/main.go`):
+   - Dual-mode detection (MCP vs CLI based on args/environment)
+   - MCP server initialization and Trino connection testing
    - Transport selection (STDIO vs HTTP with SSE)
    - Graceful shutdown with signal handling
    - CORS support for web clients
    - Version management and build metadata
 
-2. **Configuration Layer** (`internal/config/config.go`): 
+2. **CLI Layer** (`internal/cli/`):
+   - `commands.go` - CLI subcommands (query, catalogs, schemas, tables, describe, explain)
+   - `repl.go` - Interactive REPL with meta-commands (\help, \quit, \history, etc.)
+   - `config.go` - CLI config file loading (~/.config/trino/config.yaml)
+   - Output formatting (table, json, csv) with deterministic column ordering
+
+3. **Configuration Layer** (`internal/config/config.go`):
    - Environment-based configuration with validation
    - Security defaults (HTTPS, read-only queries)
    - Timeout configuration with validation
    - Connection parameter management
 
-3. **Client Layer** (`internal/trino/client.go`): 
+4. **Client Layer** (`internal/trino/client.go`):
    - Database connection management with connection pooling
    - SQL injection protection via read-only query enforcement
    - Context-based timeout handling for queries
    - Query result processing and formatting
 
-4. **Handler Layer** (`internal/mcp/handlers.go`):
+5. **Handler Layer** (`internal/mcp/handlers.go`):
    - MCP tool implementations with JSON response formatting
    - Parameter validation and error handling
    - Consistent logging for debugging

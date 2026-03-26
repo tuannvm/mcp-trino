@@ -40,6 +40,7 @@ func RunCLIMode() error {
 	// Define CLI flags
 	flagSet := flag.NewFlagSet("mcp-trino", flag.ExitOnError)
 	configFile := flagSet.String("config", "", "Path to config file")
+	profileName := flagSet.String("profile", "", "Profile name to use")
 	format := flagSet.String("format", "", "Output format (table, json, csv)")
 	host := flagSet.String("host", "", "Trino host")
 	port := flagSet.Int("port", 0, "Trino port")
@@ -73,6 +74,7 @@ func RunCLIMode() error {
 			"describe":    true,
 			"explain":     true,
 			"interactive": true,
+			"config":      true, // config profile management
 		}
 		if !validCommands[args[0]] {
 			return fmt.Errorf("unknown command: %s (run 'mcp-trino' for usage)", args[0])
@@ -93,20 +95,20 @@ func RunCLIMode() error {
 		fmt.Println("  describe <table>  Describe table schema")
 		fmt.Println("  explain <sql>     Explain query plan")
 		fmt.Println("  interactive       Start interactive REPL mode")
+		fmt.Println("  config profile    Manage connection profiles")
 		fmt.Println()
 		fmt.Println("Flags:")
 		flagSet.PrintDefaults()
 		fmt.Println()
 		fmt.Println("Environment Variables:")
 		fmt.Println("  TRINO_HOST, TRINO_PORT, TRINO_USER, TRINO_PASSWORD")
-		fmt.Println("  TRINO_CATALOG, TRINO_SCHEMA")
+		fmt.Println("  TRINO_CATALOG, TRINO_SCHEMA, TRINO_PROFILE")
 		fmt.Println()
 		fmt.Println("Examples:")
 		fmt.Println("  mcp-trino query 'SELECT 1'")
-		fmt.Println("  mcp-trino catalogs")
-		fmt.Println("  mcp-trino schemas tpch")
-		fmt.Println("  mcp-trino tables tpch tiny")
-		fmt.Println("  mcp-trino describe tpch.tiny.orders")
+		fmt.Println("  mcp-trino --profile staging catalogs")
+		fmt.Println("  mcp-trino config profile list")
+		fmt.Println("  mcp-trino config profile use prod")
 		fmt.Println("  mcp-trino --interactive")
 		return nil
 	}
@@ -119,7 +121,7 @@ func RunCLIMode() error {
 			return fmt.Errorf("failed to read config file: %w", readErr)
 		}
 		var parseErr error
-		cliConfig, parseErr = cli.ParseCLIConfig(data)
+		cliConfig, parseErr = cli.ParseCLIConfigWithPath(data, *configFile)
 		if parseErr != nil {
 			return fmt.Errorf("failed to parse config file: %w", parseErr)
 		}
@@ -133,7 +135,35 @@ func RunCLIMode() error {
 	}
 
 	// Apply CLI config to environment (config file values, flags will override)
-	cliConfig.ApplyToEnv()
+	// Resolve profile name: --profile flag > TRINO_PROFILE env > current in config > default
+	activeProfile := *profileName
+	if activeProfile == "" {
+		activeProfile = os.Getenv("TRINO_PROFILE")
+	}
+
+	// Handle config command early (doesn't need Trino connection or profile validation)
+	if len(args) > 0 && args[0] == "config" {
+		// Config commands don't need profile validation - allow users to fix stale profiles
+		return runConfigCommand(args, cliConfig)
+	}
+
+	// Validate the profile that will be used (whether explicit or from current field)
+	// This prevents silent misconfiguration when current points to a missing profile
+	profileToUse := activeProfile
+	if profileToUse == "" {
+		profileToUse = cliConfig.Current
+	}
+	if profileToUse == "" {
+		profileToUse = "default"
+	}
+	if _, err := cliConfig.GetActiveProfile(profileToUse); err != nil {
+		// Fail hard if the resolved profile doesn't exist
+		return fmt.Errorf("profile '%s' not found: %w", profileToUse, err)
+	}
+
+	if err := cliConfig.ApplyToEnv(activeProfile); err != nil {
+		log.Printf("Warning: failed to apply CLI config: %v", err)
+	}
 
 	// Apply CLI flags to environment (flags take precedence over config file)
 	if *host != "" {
@@ -248,4 +278,112 @@ func RunCLIMode() error {
 	default:
 		return fmt.Errorf("unknown command: %s", command)
 	}
+}
+
+// runConfigCommand handles config profile management commands
+func runConfigCommand(args []string, cliConfig *cli.CLIConfig) error {
+	if len(args) < 2 {
+		return fmt.Errorf("config command requires a subcommand: profile")
+	}
+
+	switch args[1] {
+	case "profile":
+		return runConfigProfileCommand(args, cliConfig)
+	default:
+		return fmt.Errorf("unknown config subcommand: %s (available: profile)", args[1])
+	}
+}
+
+// runConfigProfileCommand handles profile management commands
+func runConfigProfileCommand(args []string, cliConfig *cli.CLIConfig) error {
+	if len(args) < 3 {
+		fmt.Println("config profile - Manage Trino connection profiles")
+		fmt.Println()
+		fmt.Println("Usage:")
+		fmt.Println("  mcp-trino config profile list           List all profiles")
+		fmt.Println("  mcp-trino config profile use <name>      Set current profile")
+		fmt.Println("  mcp-trino config profile show <name>     Show profile details")
+		fmt.Println()
+		fmt.Printf("Current profile: %s\n", cliConfig.Current)
+		return nil
+	}
+
+	switch args[2] {
+	case "list":
+		return runProfileList(cliConfig)
+	case "use":
+		if len(args) < 4 {
+			return fmt.Errorf("config profile use requires a profile name")
+		}
+		return runProfileUse(cliConfig, args[3])
+	case "show":
+		if len(args) < 4 {
+			return fmt.Errorf("config profile show requires a profile name")
+		}
+		return runProfileShow(cliConfig, args[3])
+	default:
+		return fmt.Errorf("unknown profile subcommand: %s (available: list, use, show)", args[2])
+	}
+}
+
+// runProfileList lists all available profiles
+func runProfileList(cliConfig *cli.CLIConfig) error {
+	fmt.Printf("Available profiles (current: %s):\n", cliConfig.Current)
+	fmt.Println()
+
+	for name, profile := range cliConfig.Profiles {
+		currentMarker := ""
+		if name == cliConfig.Current {
+			currentMarker = " *"
+		}
+		fmt.Printf("  %s%s: %s@%s:%d\n", name, currentMarker, profile.User, profile.Host, profile.Port)
+	}
+
+	// List profile count
+	fmt.Printf("\nTotal: %d profile(s)\n", len(cliConfig.Profiles))
+	return nil
+}
+
+// runProfileUse sets the current profile
+func runProfileUse(cliConfig *cli.CLIConfig, name string) error {
+	if err := cliConfig.SetCurrent(name); err != nil {
+		return err
+	}
+	fmt.Printf("Current profile set to: %s\n", name)
+	return nil
+}
+
+// runProfileShow shows detailed information about a profile
+func runProfileShow(cliConfig *cli.CLIConfig, name string) error {
+	profile, exists := cliConfig.Profiles[name]
+	if !exists {
+		return fmt.Errorf("profile '%s' not found. Available profiles: %v",
+			name, cliConfig.GetProfileNames())
+	}
+
+	currentMarker := ""
+	if name == cliConfig.Current {
+		currentMarker = " (current)"
+	}
+
+	fmt.Printf("Profile: %s%s\n", name, currentMarker)
+	fmt.Printf("  Host: %s\n", profile.Host)
+	fmt.Printf("  Port: %d\n", profile.Port)
+	fmt.Printf("  User: %s\n", profile.User)
+	if profile.Password != "" {
+		fmt.Printf("  Password: ********\n")
+	}
+	if profile.Catalog != "" {
+		fmt.Printf("  Catalog: %s\n", profile.Catalog)
+	}
+	if profile.Schema != "" {
+		fmt.Printf("  Schema: %s\n", profile.Schema)
+	}
+	if profile.SSL.Enabled != nil {
+		fmt.Printf("  SSL: %v\n", *profile.SSL.Enabled)
+	}
+	if profile.SSL.Insecure {
+		fmt.Printf("  SSL Insecure: true\n")
+	}
+	return nil
 }

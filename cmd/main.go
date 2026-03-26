@@ -178,6 +178,7 @@ func shouldRunCLIMode(args []string) bool {
 		"describe":    true,
 		"explain":     true,
 		"interactive": true,
+		"config":      true, // config profile management
 	}
 
 	for _, arg := range args {
@@ -221,6 +222,7 @@ func hasCLIOnlyFlags(args []string) bool {
 		"--password": true,
 		"--catalog":  true,
 		"--schema":   true,
+		"--profile":  true, // profile selection is CLI-specific
 		"--interactive": true,
 	}
 

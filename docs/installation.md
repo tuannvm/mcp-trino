@@ -86,3 +86,52 @@ If you encounter issues during installation:
 - Check the [GitHub Issues](https://github.com/tuannvm/mcp-trino/issues) for similar problems
 - Run the install script with `--help` for usage information
 - Use manual installation methods if the automated script fails
+
+## Testing Your Installation
+
+After installation, verify mcp-trino works correctly:
+
+### Test CLI Mode
+
+```bash
+# Verify binary is installed
+mcp-trino --version
+
+# Test with a local Trino instance (if available)
+export TRINO_HOST=localhost TRINO_PORT=8080 TRINO_USER=trino
+mcp-trino catalogs
+
+# Or use config file
+mkdir -p ~/.config/trino
+cat > ~/.config/trino/config.yaml << EOF
+trino:
+  host: localhost
+  port: 8080
+  user: trino
+EOF
+
+mcp-trino catalogs
+```
+
+### Test Interactive REPL
+
+```bash
+# Start interactive mode
+mcp-trino --interactive
+
+# In the REPL, try:
+trino> \help
+trino> \catalogs
+trino> \quit
+```
+
+### Test MCP Mode
+
+```bash
+# Should start MCP server (no args, no TTY)
+echo "" | mcp-trino
+
+# Should show "Starting Trino MCP Server" in output
+```
+
+For more CLI usage examples, see the [CLI Mode](../README.md#cli-mode) section in the main README.

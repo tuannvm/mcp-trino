@@ -48,7 +48,7 @@ After: `apple | banana | zebra` (alphabetically sorted)
 Values are applied in this order (later overrides earlier):
 
 1. **Defaults** (hardcoded)
-2. **Config file** (`~/.mcp-trino/config.yaml`)
+2. **Config file** (`~/.config/trino/config.yaml`)
 3. **Environment variables** (`TRINO_*`)
 4. **CLI flags** (`--host`, `--port`, etc.)
 

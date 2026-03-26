@@ -40,25 +40,36 @@ output:
 		t.Fatalf("ParseCLIConfig() failed: %v", err)
 	}
 
-	if cfg.Trino.Host != "localhost" {
-		t.Errorf("expected host 'localhost', got '%s'", cfg.Trino.Host)
+	// After migration, data should be in Profiles["default"]
+	defaultProfile, exists := cfg.Profiles["default"]
+	if !exists {
+		t.Fatal("expected 'default' profile to exist after migration")
 	}
-	if cfg.Trino.Port != 8080 {
-		t.Errorf("expected port 8080, got %d", cfg.Trino.Port)
+
+	if defaultProfile.Host != "localhost" {
+		t.Errorf("expected host 'localhost', got '%s'", defaultProfile.Host)
 	}
-	if cfg.Trino.User != "testuser" {
-		t.Errorf("expected user 'testuser', got '%s'", cfg.Trino.User)
+	if defaultProfile.Port != 8080 {
+		t.Errorf("expected port 8080, got %d", defaultProfile.Port)
+	}
+	if defaultProfile.User != "testuser" {
+		t.Errorf("expected user 'testuser', got '%s'", defaultProfile.User)
 	}
 	if cfg.Output.Format != "json" {
 		t.Errorf("expected output format 'json', got '%s'", cfg.Output.Format)
 	}
 
 	// Test SSL pointer bool
-	if cfg.Trino.SSL.Enabled == nil {
+	if defaultProfile.SSL.Enabled == nil {
 		t.Error("expected SSL.Enabled to be non-nil when explicitly set")
 	}
-	if cfg.Trino.SSL.Enabled != nil && !*cfg.Trino.SSL.Enabled {
+	if defaultProfile.SSL.Enabled != nil && !*defaultProfile.SSL.Enabled {
 		t.Error("expected SSL.Enabled to be true")
+	}
+
+	// Verify current is set to "default" after migration
+	if cfg.Current != "default" {
+		t.Errorf("expected current to be 'default' after migration, got '%s'", cfg.Current)
 	}
 }
 
@@ -116,35 +127,29 @@ func TestApplyToEnv(t *testing.T) {
 		_ = os.Unsetenv(envVar)
 	}
 
+	sslEnabled := true
 	cfg := &CLIConfig{
-		Trino: struct {
-			Host     string `yaml:"host"`
-			Port     int    `yaml:"port"`
-			User     string `yaml:"user"`
-			Password string `yaml:"password"`
-			Catalog  string `yaml:"catalog"`
-			Schema   string `yaml:"schema"`
-			Source   string `yaml:"source"`
-			SSL      struct {
-				Enabled  *bool `yaml:"enabled"`
-				Insecure bool  `yaml:"insecure"`
-			} `yaml:"ssl"`
-		}{
-			Host:     "testhost",
-			Port:     9000,
-			User:     "testuser",
-			Password: "testpass",
-			Catalog:  "test_catalog",
-			Schema:   "test_schema",
-			Source:   "test_source",
+		Current: "test-profile",
+		Profiles: map[string]TrinoProfileConfig{
+			"test-profile": {
+				Host:     "testhost",
+				Port:     9000,
+				User:     "testuser",
+				Password: "testpass",
+				Catalog:  "test_catalog",
+				Schema:   "test_schema",
+				Source:   "test_source",
+				SSL: struct {
+					Enabled  *bool `yaml:"enabled"`
+					Insecure bool  `yaml:"insecure"`
+				}{
+					Enabled: &sslEnabled,
+				},
+			},
 		},
 	}
 
-	// Test SSL enabled = true
-	sslEnabled := true
-	cfg.Trino.SSL.Enabled = &sslEnabled
-
-	cfg.ApplyToEnv()
+	_ = cfg.ApplyToEnv("test-profile")
 
 	// Verify environment variables were set
 	if os.Getenv("TRINO_HOST") != "testhost" {
@@ -168,29 +173,23 @@ func TestApplyToEnv_SSLDisabled(t *testing.T) {
 	// Clean environment before test
 	_ = os.Unsetenv("TRINO_SSL")
 
+	sslEnabled := false
 	cfg := &CLIConfig{
-		Trino: struct {
-			Host     string `yaml:"host"`
-			Port     int    `yaml:"port"`
-			User     string `yaml:"user"`
-			Password string `yaml:"password"`
-			Catalog  string `yaml:"catalog"`
-			Schema   string `yaml:"schema"`
-			Source   string `yaml:"source"`
-			SSL      struct {
-				Enabled  *bool `yaml:"enabled"`
-				Insecure bool  `yaml:"insecure"`
-			} `yaml:"ssl"`
-		}{
-			Host: "testhost",
+		Current: "test-profile",
+		Profiles: map[string]TrinoProfileConfig{
+			"test-profile": {
+				Host: "testhost",
+				SSL: struct {
+					Enabled  *bool `yaml:"enabled"`
+					Insecure bool  `yaml:"insecure"`
+				}{
+					Enabled: &sslEnabled,
+				},
+			},
 		},
 	}
 
-	// Test SSL enabled = false
-	sslEnabled := false
-	cfg.Trino.SSL.Enabled = &sslEnabled
-
-	cfg.ApplyToEnv()
+	_ = cfg.ApplyToEnv("test-profile")
 
 	// Verify TRINO_SSL is set to false
 	if os.Getenv("TRINO_SSL") != "false" {
@@ -203,25 +202,22 @@ func TestApplyToEnv_SSLNotSet(t *testing.T) {
 	_ = os.Unsetenv("TRINO_SSL")
 
 	cfg := &CLIConfig{
-		Trino: struct {
-			Host     string `yaml:"host"`
-			Port     int    `yaml:"port"`
-			User     string `yaml:"user"`
-			Password string `yaml:"password"`
-			Catalog  string `yaml:"catalog"`
-			Schema   string `yaml:"schema"`
-			Source   string `yaml:"source"`
-			SSL      struct {
-				Enabled  *bool `yaml:"enabled"`
-				Insecure bool  `yaml:"insecure"`
-			} `yaml:"ssl"`
-		}{
-			Host: "testhost",
+		Current: "test-profile",
+		Profiles: map[string]TrinoProfileConfig{
+			"test-profile": {
+				Host: "testhost",
+				SSL: struct {
+					Enabled  *bool `yaml:"enabled"`
+					Insecure bool  `yaml:"insecure"`
+				}{
+					Enabled: nil, // not set
+				},
+			},
 		},
 	}
 
 	// SSL.Enabled is nil (not set in config)
-	cfg.ApplyToEnv()
+	_ = cfg.ApplyToEnv("test-profile")
 
 	// Verify TRINO_SSL is NOT set (preserves default)
 	if ssl := os.Getenv("TRINO_SSL"); ssl != "" {
@@ -260,20 +256,13 @@ func TestSaveCLIConfig(t *testing.T) {
 	_ = os.Setenv("HOME", tmpDir)
 
 	cfg := &CLIConfig{
-		Trino: struct {
-			Host     string `yaml:"host"`
-			Port     int    `yaml:"port"`
-			User     string `yaml:"user"`
-			Password string `yaml:"password"`
-			Catalog  string `yaml:"catalog"`
-			Schema   string `yaml:"schema"`
-			Source   string `yaml:"source"`
-			SSL      struct {
-				Enabled  *bool `yaml:"enabled"`
-				Insecure bool  `yaml:"insecure"`
-			} `yaml:"ssl"`
-		}{
-			Host: "testhost",
+		Current: "default",
+		Profiles: map[string]TrinoProfileConfig{
+			"default": {
+				Host: "testhost",
+				Port: 8080,
+				User: "testuser",
+			},
 		},
 		Output: struct {
 			Format string `yaml:"format"`
@@ -299,10 +288,241 @@ func TestSaveCLIConfig(t *testing.T) {
 		t.Fatalf("LoadCLIConfig() failed: %v", err)
 	}
 
-	if loadedCfg.Trino.Host != "testhost" {
-		t.Errorf("expected host 'testhost', got '%s'", loadedCfg.Trino.Host)
+	// Check the default profile was loaded
+	defaultProfile, exists := loadedCfg.Profiles["default"]
+	if !exists {
+		t.Fatal("default profile not found after loading")
+	}
+
+	if defaultProfile.Host != "testhost" {
+		t.Errorf("expected host 'testhost', got '%s'", defaultProfile.Host)
 	}
 	if loadedCfg.Output.Format != "json" {
 		t.Errorf("expected format 'json', got '%s'", loadedCfg.Output.Format)
+	}
+}
+
+// Profile-related tests
+
+func TestGetActiveProfile_Default(t *testing.T) {
+	cfg := &CLIConfig{
+		Current: "default",
+		Profiles: map[string]TrinoProfileConfig{
+			"default": {
+				Host: "localhost",
+				Port: 8080,
+				User: "trino",
+			},
+			"prod": {
+				Host: "prod.example.com",
+				Port: 443,
+				User: "prod_user",
+			},
+		},
+	}
+
+	profile, err := cfg.GetActiveProfile("")
+	if err != nil {
+		t.Fatalf("GetActiveProfile() failed: %v", err)
+	}
+
+	if profile.Host != "localhost" {
+		t.Errorf("expected host 'localhost', got '%s'", profile.Host)
+	}
+}
+
+func TestGetActiveProfile_Explicit(t *testing.T) {
+	cfg := &CLIConfig{
+		Current: "default",
+		Profiles: map[string]TrinoProfileConfig{
+			"default": {
+				Host: "localhost",
+				Port: 8080,
+				User: "trino",
+			},
+			"prod": {
+				Host: "prod.example.com",
+				Port: 443,
+				User: "prod_user",
+			},
+		},
+	}
+
+	profile, err := cfg.GetActiveProfile("prod")
+	if err != nil {
+		t.Fatalf("GetActiveProfile() failed: %v", err)
+	}
+
+	if profile.Host != "prod.example.com" {
+		t.Errorf("expected host 'prod.example.com', got '%s'", profile.Host)
+	}
+}
+
+func TestGetActiveProfile_NotFound(t *testing.T) {
+	cfg := &CLIConfig{
+		Current: "default",
+		Profiles: map[string]TrinoProfileConfig{
+			"default": {
+				Host: "localhost",
+				Port: 8080,
+				User: "trino",
+			},
+		},
+	}
+
+	_, err := cfg.GetActiveProfile("nonexistent")
+	if err == nil {
+		t.Error("GetActiveProfile() should fail for non-existent profile")
+	}
+}
+
+func TestValidate_CurrentExists(t *testing.T) {
+	cfg := &CLIConfig{
+		Current: "prod",
+		Profiles: map[string]TrinoProfileConfig{
+			"prod": {
+				Host: "prod.example.com",
+				Port: 443,
+				User: "prod_user",
+			},
+		},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() failed: %v", err)
+	}
+}
+
+func TestValidate_CurrentNotExists(t *testing.T) {
+	cfg := &CLIConfig{
+		Current: "nonexistent",
+		Profiles: map[string]TrinoProfileConfig{
+			"prod": {
+				Host: "prod.example.com",
+				Port: 443,
+				User: "prod_user",
+			},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Error("Validate() should fail when current profile doesn't exist")
+	}
+}
+
+func TestValidate_MissingRequiredFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		profile TrinoProfileConfig
+	}{
+		{
+			name: "missing host",
+			profile: TrinoProfileConfig{
+				Port: 443,
+				User: "testuser",
+			},
+		},
+		{
+			name: "invalid port",
+			profile: TrinoProfileConfig{
+				Host: "testhost",
+				Port: 0,
+				User: "testuser",
+			},
+		},
+		{
+			name: "missing user",
+			profile: TrinoProfileConfig{
+				Host: "testhost",
+				Port: 443,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &CLIConfig{
+				Current: "test",
+				Profiles: map[string]TrinoProfileConfig{
+					"test": tt.profile,
+				},
+			}
+
+			if err := cfg.Validate(); err == nil {
+				t.Error("Validate() should fail for invalid profile")
+			}
+		})
+	}
+}
+
+func TestGetProfileNames(t *testing.T) {
+	cfg := &CLIConfig{
+		Current: "prod",
+		Profiles: map[string]TrinoProfileConfig{
+			"prod":    {Host: "prod.example.com", Port: 443, User: "prod_user"},
+			"staging": {Host: "staging.example.com", Port: 443, User: "staging_user"},
+			"dev":     {Host: "localhost", Port: 8080, User: "dev_user"},
+		},
+	}
+
+	names := cfg.GetProfileNames()
+
+	if len(names) != 3 {
+		t.Errorf("expected 3 profiles, got %d", len(names))
+	}
+
+	// Check that names are sorted
+	for i := 1; i < len(names); i++ {
+		if names[i-1] > names[i] {
+			t.Errorf("profile names not sorted: %v", names)
+		}
+	}
+}
+
+func TestSetCurrent(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", originalHome)
+	})
+	_ = os.Setenv("HOME", tmpDir)
+
+	cfg := &CLIConfig{
+		Current: "default",
+		Profiles: map[string]TrinoProfileConfig{
+			"default": {Host: "localhost", Port: 8080, User: "trino"},
+			"prod":    {Host: "prod.example.com", Port: 443, User: "prod_user"},
+		},
+	}
+
+	if err := cfg.SetCurrent("prod"); err != nil {
+		t.Fatalf("SetCurrent() failed: %v", err)
+	}
+
+	if cfg.Current != "prod" {
+		t.Errorf("expected current='prod', got '%s'", cfg.Current)
+	}
+
+	// Verify it was saved
+	loadedCfg, err := LoadCLIConfig()
+	if err != nil {
+		t.Fatalf("LoadCLIConfig() failed: %v", err)
+	}
+
+	if loadedCfg.Current != "prod" {
+		t.Errorf("expected saved current='prod', got '%s'", loadedCfg.Current)
+	}
+}
+
+func TestSetCurrent_NotFound(t *testing.T) {
+	cfg := &CLIConfig{
+		Current: "default",
+		Profiles: map[string]TrinoProfileConfig{
+			"default": {Host: "localhost", Port: 8080, User: "trino"},
+		},
+	}
+
+	if err := cfg.SetCurrent("nonexistent"); err == nil {
+		t.Error("SetCurrent() should fail for non-existent profile")
 	}
 }
