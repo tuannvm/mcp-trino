@@ -129,7 +129,8 @@ func TestApplyToEnv(t *testing.T) {
 
 	sslEnabled := true
 	cfg := &CLIConfig{
-		Current: "test-profile",
+		ConfigFileExists: true,
+		Current:          "test-profile",
 		Profiles: map[string]TrinoProfileConfig{
 			"test-profile": {
 				Host:     "testhost",
@@ -175,7 +176,8 @@ func TestApplyToEnv_SSLDisabled(t *testing.T) {
 
 	sslEnabled := false
 	cfg := &CLIConfig{
-		Current: "test-profile",
+		ConfigFileExists: true,
+		Current:          "test-profile",
 		Profiles: map[string]TrinoProfileConfig{
 			"test-profile": {
 				Host: "testhost",
@@ -202,10 +204,13 @@ func TestApplyToEnv_SSLNotSet(t *testing.T) {
 	_ = os.Unsetenv("TRINO_SSL")
 
 	cfg := &CLIConfig{
-		Current: "test-profile",
+		ConfigFileExists: true,
+		Current:          "test-profile",
 		Profiles: map[string]TrinoProfileConfig{
 			"test-profile": {
 				Host: "testhost",
+				Port: 9000,
+				User: "testuser",
 				SSL: struct {
 					Enabled  *bool `yaml:"enabled"`
 					Insecure bool  `yaml:"insecure"`
@@ -524,5 +529,198 @@ func TestSetCurrent_NotFound(t *testing.T) {
 
 	if err := cfg.SetCurrent("nonexistent"); err == nil {
 		t.Error("SetCurrent() should fail for non-existent profile")
+	}
+}
+
+func TestCLIProfileOAuthFields(t *testing.T) {
+	yaml := `
+current: prod
+profiles:
+  prod:
+    host: trino.example.com
+    port: 443
+    user: service-account
+    auth_mode: oauth
+    oauth_token_url: https://login.microsoftonline.com/tenant/oauth2/v2.0/token
+    oauth_client_id: my-client-id
+    oauth_client_secret: my-secret
+    oauth_scopes: api://trino/.default
+`
+	cfg, err := ParseCLIConfig([]byte(yaml))
+	if err != nil {
+		t.Fatalf("ParseCLIConfig() failed: %v", err)
+	}
+
+	profile, err := cfg.GetActiveProfile("")
+	if err != nil {
+		t.Fatalf("GetActiveProfile() failed: %v", err)
+	}
+
+	if profile.AuthMode != "oauth" {
+		t.Errorf("AuthMode = %q, want 'oauth'", profile.AuthMode)
+	}
+	if profile.OAuthTokenURL != "https://login.microsoftonline.com/tenant/oauth2/v2.0/token" {
+		t.Errorf("OAuthTokenURL = %q", profile.OAuthTokenURL)
+	}
+	if profile.OAuthClientID != "my-client-id" {
+		t.Errorf("OAuthClientID = %q", profile.OAuthClientID)
+	}
+	if profile.OAuthClientSecret != "my-secret" {
+		t.Errorf("OAuthClientSecret = %q", profile.OAuthClientSecret)
+	}
+	if profile.OAuthScopes != "api://trino/.default" {
+		t.Errorf("OAuthScopes = %q", profile.OAuthScopes)
+	}
+}
+
+func TestCLIProfileOAuthApplyToEnv(t *testing.T) {
+	// Save and restore env
+	envVars := []string{"TRINO_AUTH_MODE", "TRINO_OAUTH_TOKEN_URL", "TRINO_OAUTH_CLIENT_ID", "TRINO_OAUTH_CLIENT_SECRET", "TRINO_OAUTH_SCOPES"}
+	origVals := make(map[string]string)
+	for _, k := range envVars {
+		origVals[k] = os.Getenv(k)
+	}
+	defer func() {
+		for _, k := range envVars {
+			_ = os.Setenv(k, origVals[k])
+		}
+	}()
+
+	cfg := &CLIConfig{
+		ConfigFileExists: true,
+		Current:          "oauth-profile",
+		Profiles: map[string]TrinoProfileConfig{
+			"oauth-profile": {
+				Host:              "trino.example.com",
+				Port:              443,
+				User:              "svc",
+				AuthMode:          "oauth",
+				OAuthTokenURL:     "https://login.microsoftonline.com/t/oauth2/v2.0/token",
+				OAuthClientID:     "cid",
+				OAuthClientSecret: "csec",
+				OAuthScopes:       "api://trino/.default",
+			},
+		},
+	}
+
+	err := cfg.ApplyToEnv("")
+	if err != nil {
+		t.Fatalf("ApplyToEnv() failed: %v", err)
+	}
+
+	if v := os.Getenv("TRINO_AUTH_MODE"); v != "oauth" {
+		t.Errorf("TRINO_AUTH_MODE = %q, want 'oauth'", v)
+	}
+	if v := os.Getenv("TRINO_OAUTH_TOKEN_URL"); v != "https://login.microsoftonline.com/t/oauth2/v2.0/token" {
+		t.Errorf("TRINO_OAUTH_TOKEN_URL = %q", v)
+	}
+	if v := os.Getenv("TRINO_OAUTH_CLIENT_ID"); v != "cid" {
+		t.Errorf("TRINO_OAUTH_CLIENT_ID = %q", v)
+	}
+	if v := os.Getenv("TRINO_OAUTH_CLIENT_SECRET"); v != "csec" {
+		t.Errorf("TRINO_OAUTH_CLIENT_SECRET = %q", v)
+	}
+	if v := os.Getenv("TRINO_OAUTH_SCOPES"); v != "api://trino/.default" {
+		t.Errorf("TRINO_OAUTH_SCOPES = %q", v)
+	}
+}
+
+func TestCLIProfileBasicOverridesStaleOAuth(t *testing.T) {
+	// Simulate: TRINO_AUTH_MODE=oauth was set by a previous profile or env
+	envVars := []string{"TRINO_AUTH_MODE", "TRINO_OAUTH_TOKEN_URL", "TRINO_OAUTH_CLIENT_ID", "TRINO_OAUTH_CLIENT_SECRET", "TRINO_OAUTH_SCOPES"}
+	origVals := make(map[string]string)
+	for _, k := range envVars {
+		origVals[k] = os.Getenv(k)
+	}
+	defer func() {
+		for _, k := range envVars {
+			_ = os.Setenv(k, origVals[k])
+		}
+	}()
+
+	// Pre-set stale OAuth env
+	_ = os.Setenv("TRINO_AUTH_MODE", "oauth")
+	_ = os.Setenv("TRINO_OAUTH_TOKEN_URL", "https://stale.example.com/token")
+	_ = os.Setenv("TRINO_OAUTH_CLIENT_ID", "stale-client")
+	_ = os.Setenv("TRINO_OAUTH_CLIENT_SECRET", "stale-secret")
+	_ = os.Setenv("TRINO_OAUTH_SCOPES", "stale-scope")
+
+	// Apply a basic profile (no auth_mode set)
+	cfg := &CLIConfig{
+		ConfigFileExists: true,
+		Current:          "basic-profile",
+		Profiles: map[string]TrinoProfileConfig{
+			"basic-profile": {
+				Host: "trino.example.com",
+				Port: 8080,
+				User: "trino",
+			},
+		},
+	}
+
+	err := cfg.ApplyToEnv("")
+	if err != nil {
+		t.Fatalf("ApplyToEnv() failed: %v", err)
+	}
+
+	// Should have overridden to "basic"
+	if v := os.Getenv("TRINO_AUTH_MODE"); v != "basic" {
+		t.Errorf("TRINO_AUTH_MODE = %q, want 'basic' (should override stale oauth)", v)
+	}
+
+	// Stale OAuth env vars should be cleared when switching to basic
+	for _, key := range []string{"TRINO_OAUTH_TOKEN_URL", "TRINO_OAUTH_CLIENT_ID", "TRINO_OAUTH_CLIENT_SECRET", "TRINO_OAUTH_SCOPES"} {
+		if v := os.Getenv(key); v != "" {
+			t.Errorf("%s = %q, want empty (should be cleared on basic profile switch)", key, v)
+		}
+	}
+}
+
+func TestApplyToEnv_ClearsStaleOAuthEnvVars(t *testing.T) {
+	envVars := []string{"TRINO_AUTH_MODE", "TRINO_OAUTH_TOKEN_URL", "TRINO_OAUTH_CLIENT_ID", "TRINO_OAUTH_CLIENT_SECRET", "TRINO_OAUTH_SCOPES"}
+	origVals := make(map[string]string)
+	for _, k := range envVars {
+		origVals[k] = os.Getenv(k)
+	}
+	defer func() {
+		for _, k := range envVars {
+			_ = os.Setenv(k, origVals[k])
+		}
+	}()
+
+	// Pre-set stale OAuth env vars (simulating previous device-code session)
+	_ = os.Setenv("TRINO_AUTH_MODE", "device-code")
+	_ = os.Setenv("TRINO_OAUTH_TOKEN_URL", "https://stale.example.com/token")
+	_ = os.Setenv("TRINO_OAUTH_CLIENT_ID", "stale-client-id")
+	_ = os.Setenv("TRINO_OAUTH_CLIENT_SECRET", "stale-secret")
+	_ = os.Setenv("TRINO_OAUTH_SCOPES", "stale-scope")
+
+	// Switch to a basic profile
+	cfg := &CLIConfig{
+		ConfigFileExists: true,
+		Current:          "basic-profile",
+		Profiles: map[string]TrinoProfileConfig{
+			"basic-profile": {
+				Host:     "trino.example.com",
+				Port:     8080,
+				User:     "trino",
+				AuthMode: "basic",
+			},
+		},
+	}
+
+	err := cfg.ApplyToEnv("")
+	if err != nil {
+		t.Fatalf("ApplyToEnv() failed: %v", err)
+	}
+
+	if v := os.Getenv("TRINO_AUTH_MODE"); v != "basic" {
+		t.Errorf("TRINO_AUTH_MODE = %q, want 'basic'", v)
+	}
+	// All stale OAuth vars should be cleared
+	for _, key := range []string{"TRINO_OAUTH_TOKEN_URL", "TRINO_OAUTH_CLIENT_ID", "TRINO_OAUTH_CLIENT_SECRET", "TRINO_OAUTH_SCOPES"} {
+		if v := os.Getenv(key); v != "" {
+			t.Errorf("%s = %q, want empty (stale env var not cleared)", key, v)
+		}
 	}
 }

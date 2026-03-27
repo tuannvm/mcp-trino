@@ -816,3 +816,242 @@ flowchart TD
 1. JWT client assertion support (public key/private key authentication)
 2. Token introspection endpoint
 3. Dynamic client registry with persistence
+
+---
+
+## Trino Connection OAuth (Client Credentials)
+
+> **New in v0.x**: mcp-trino can authenticate to the Trino server itself using OAuth 2.0 client_credentials flow. This is separate from the MCP API OAuth described above.
+
+### Overview
+
+When your Trino server requires OAuth/JWT bearer token authentication (common with Azure AD, Okta, etc.), mcp-trino can transparently obtain and refresh tokens using the **client_credentials** grant — no browser popup or user interaction required.
+
+```mermaid
+sequenceDiagram
+    participant MCP as mcp-trino (local)
+    participant IdP as Azure AD / Okta
+    participant Trino as Trino Server
+
+    Note over MCP,IdP: Startup: Token Acquisition
+    MCP->>IdP: 1. POST /token (client_id + client_secret)
+    IdP->>MCP: 2. Access token (JWT)
+
+    Note over MCP,Trino: Query Execution
+    MCP->>Trino: 3. SQL query + Authorization: Bearer <token>
+    Trino->>MCP: 4. Results
+
+    Note over MCP,IdP: Auto-Refresh (transparent)
+    MCP->>IdP: 5. POST /token (when token expires)
+    IdP->>MCP: 6. New access token
+```
+
+### Configuration
+
+Set `TRINO_AUTH_MODE=oauth` and provide the OAuth credentials:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `TRINO_AUTH_MODE` | No (default: `basic`) | Set to `oauth` for bearer token auth |
+| `TRINO_OAUTH_TOKEN_URL` | Yes (when oauth) | Token endpoint, e.g. `https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/token` |
+| `TRINO_OAUTH_CLIENT_ID` | Yes (when oauth) | Azure AD App Registration client ID |
+| `TRINO_OAUTH_CLIENT_SECRET` | Yes (when oauth) | Azure AD App Registration client secret |
+| `TRINO_OAUTH_SCOPES` | No | Comma-separated scopes, e.g. `api://{app-id}/.default` |
+
+### Example: Azure AD Setup
+
+**Environment variables:**
+
+```bash
+export TRINO_HOST=trino.example.com
+export TRINO_PORT=443
+export TRINO_SCHEME=https
+export TRINO_AUTH_MODE=oauth
+export TRINO_OAUTH_TOKEN_URL=https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/token
+export TRINO_OAUTH_CLIENT_ID=your-app-registration-client-id
+export TRINO_OAUTH_CLIENT_SECRET=your-client-secret
+export TRINO_OAUTH_SCOPES=api://your-trino-app-id/.default
+```
+
+**CLI config profile (~/.config/trino/config.yaml):**
+
+```yaml
+current: prod-oauth
+profiles:
+  prod-oauth:
+    host: trino.example.com
+    port: 443
+    user: service-account
+    auth_mode: oauth
+    oauth_token_url: https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/token
+    oauth_client_id: your-app-registration-client-id
+    oauth_client_secret: your-client-secret
+    oauth_scopes: api://your-trino-app-id/.default
+    ssl:
+      enabled: true
+      insecure: false
+```
+
+**MCP client config (e.g. Claude Desktop):**
+
+```json
+{
+  "mcpServers": {
+    "trino": {
+      "command": "mcp-trino",
+      "env": {
+        "TRINO_HOST": "trino.example.com",
+        "TRINO_PORT": "443",
+        "TRINO_SCHEME": "https",
+        "TRINO_AUTH_MODE": "oauth",
+        "TRINO_OAUTH_TOKEN_URL": "https://login.microsoftonline.com/TENANT/oauth2/v2.0/token",
+        "TRINO_OAUTH_CLIENT_ID": "client-id",
+        "TRINO_OAUTH_CLIENT_SECRET": "client-secret",
+        "TRINO_OAUTH_SCOPES": "api://trino-app/.default"
+      }
+    }
+  }
+}
+```
+
+### How It Works
+
+1. On startup, mcp-trino creates an OAuth2 `TokenSource` using `golang.org/x/oauth2/clientcredentials`
+2. Every HTTP request to Trino goes through a custom `RoundTripper` that:
+   - Calls `TokenSource.Token()` to get a valid token (auto-refreshes if expired)
+   - Sets `Authorization: Bearer <token>` header on the request
+3. In `basic` mode (default), the existing user/password auth is used unchanged
+4. Token refresh is fully transparent — no user interaction needed
+
+## Trino Connection OAuth (Device Code Flow)
+
+> **Recommended for interactive users**: The device code flow allows human users to authenticate via a browser one time, then uses cached refresh tokens for silent re-authentication on subsequent runs.
+
+### Overview
+
+When your Trino server requires Azure AD OAuth and you need **user-level** authentication (not service-to-service), the **device code flow** is the right choice. It:
+- Prompts the user once to open a browser and enter a code
+- Caches the refresh token locally for silent re-authentication
+- Works in STDIO mode (no HTTP server needed)
+- Supports Azure AD's `preferred_username` claim for Trino identity
+
+```mermaid
+sequenceDiagram
+    participant MCP as mcp-trino (local)
+    participant IdP as Azure AD
+    participant User as User Browser
+    participant Trino as Trino Server
+
+    Note over MCP,IdP: First Run: Device Code Flow
+    MCP->>IdP: 1. POST /devicecode (client_id + scopes)
+    IdP->>MCP: 2. Device code + user code + verification URL
+    MCP->>User: 3. Display: "Open https://microsoft.com/devicelogin, enter code ABC123"
+    User->>IdP: 4. User opens URL, enters code, authenticates
+    MCP->>IdP: 5. Poll POST /token (device_code)
+    IdP->>MCP: 6. Access token + refresh token
+    MCP->>Trino: 7. SQL query + Authorization: Bearer <token>
+
+    Note over MCP,IdP: Subsequent Runs: Silent Refresh
+    MCP->>IdP: 1. POST /token (refresh_token)
+    IdP->>MCP: 2. New access token + refresh token
+    MCP->>Trino: 3. SQL query + Authorization: Bearer <token>
+```
+
+### Configuration
+
+Set `TRINO_AUTH_MODE=device-code` and provide the OAuth client configuration:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `TRINO_AUTH_MODE` | Yes | Set to `device-code` |
+| `TRINO_OAUTH_TOKEN_URL` | Yes | Token endpoint, e.g. `https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/token` |
+| `TRINO_OAUTH_CLIENT_ID` | Yes | Azure AD App Registration client ID |
+| `TRINO_OAUTH_CLIENT_SECRET` | No | Client secret (not required for public clients) |
+| `TRINO_OAUTH_SCOPES` | Yes | Comma-separated scopes including `offline_access` for refresh tokens |
+| `TRINO_USER` | Yes | Must match the `preferred_username` claim from Azure AD (case-sensitive) |
+
+### Azure AD App Registration Requirements
+
+1. **Allow public client flows** must be **Yes** in the Azure AD app registration (Authentication → Advanced settings)
+2. The app must have the required API permissions configured
+3. `offline_access` scope is required for refresh token support
+
+### Token Cache
+
+Tokens are cached at `~/.config/trino/token-cache-{hash}.json` where `{hash}` is derived from the token URL and client ID. This means:
+- **Different tenants/apps get separate caches** — no cross-contamination
+- **Refresh tokens persist across restarts** — no re-authentication needed until refresh token expires
+- **Cache files have 0600 permissions** — only the owner can read/write
+
+### Example: Azure AD Setup
+
+**Environment variables:**
+
+```bash
+export TRINO_HOST=trino.example.com
+export TRINO_PORT=443
+export TRINO_SCHEME=https
+export TRINO_USER=Your.Name  # Must match Azure AD preferred_username (case-sensitive!)
+export TRINO_AUTH_MODE=device-code
+export TRINO_OAUTH_TOKEN_URL=https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/token
+export TRINO_OAUTH_CLIENT_ID=your-app-registration-client-id
+export TRINO_OAUTH_SCOPES=openid,profile,email,offline_access,api://your-app-id/user_impersonation
+```
+
+**CLI config profile (~/.config/trino/config.yaml):**
+
+```yaml
+current: prod-device
+profiles:
+  prod-device:
+    host: trino.example.com
+    port: 443
+    user: Your.Name
+    auth_mode: device-code
+    oauth_token_url: https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/token
+    oauth_client_id: your-app-registration-client-id
+    oauth_scopes: openid,profile,email,offline_access,api://your-app-id/user_impersonation
+    ssl:
+      enabled: true
+      insecure: false
+```
+
+**MCP client config (e.g. Claude Desktop):**
+
+```json
+{
+  "mcpServers": {
+    "trino": {
+      "command": "mcp-trino",
+      "env": {
+        "TRINO_HOST": "trino.example.com",
+        "TRINO_PORT": "443",
+        "TRINO_SCHEME": "https",
+        "TRINO_USER": "Your.Name",
+        "TRINO_AUTH_MODE": "device-code",
+        "TRINO_OAUTH_TOKEN_URL": "https://login.microsoftonline.com/TENANT/oauth2/v2.0/token",
+        "TRINO_OAUTH_CLIENT_ID": "client-id",
+        "TRINO_OAUTH_SCOPES": "openid,profile,email,offline_access,api://app-id/user_impersonation"
+      }
+    }
+  }
+}
+```
+
+### How It Works
+
+1. On first run, mcp-trino requests a device code from Azure AD and displays authentication instructions on stderr
+2. User opens a browser, enters the code, and authenticates
+3. mcp-trino polls the token endpoint until authentication completes
+4. Access and refresh tokens are cached to `~/.config/trino/token-cache-{hash}.json`
+5. On subsequent runs, the cached refresh token is used to silently obtain new access tokens
+6. If the refresh token expires, the device code flow is re-initiated
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| `AADSTS7000218: must contain client_secret` | Enable "Allow public client flows" in Azure AD app registration |
+| `User X cannot impersonate user Y` | `TRINO_USER` must match `preferred_username` exactly (case-sensitive) |
+| Token refresh fails | Delete `~/.config/trino/token-cache-*.json` and re-authenticate |
+| Scopes error | Ensure `offline_access` is included for refresh token support |

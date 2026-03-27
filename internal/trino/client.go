@@ -14,6 +14,8 @@ import (
 	"github.com/trinodb/trino-go-client/trino"
 	"github.com/tuannvm/mcp-trino/internal/config"
 	oauth "github.com/tuannvm/oauth-mcp-proxy"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/clientcredentials"
 )
 
 // Pre-compiled regexes for read-only query detection
@@ -83,14 +85,116 @@ const (
 	impersonatedUserKey contextKey = "impersonated_user"
 )
 
-// headerRoundTripper adds X-Trino-Source and X-Trino-User headers to requests
+// oauth2Token represents an OAuth2 token (mirrors oauth2.Token for testability)
+type oauth2Token struct {
+	AccessToken string
+}
+
+// oauth2TokenSource abstracts token acquisition for testability
+type oauth2TokenSource interface {
+	Token() (*oauth2Token, error)
+}
+
+// realTokenSource wraps golang.org/x/oauth2.TokenSource
+type realTokenSource struct {
+	source oauth2.TokenSource
+}
+
+func (r *realTokenSource) Token() (*oauth2Token, error) {
+	tok, err := r.source.Token()
+	if err != nil {
+		return nil, err
+	}
+	return &oauth2Token{AccessToken: tok.AccessToken}, nil
+}
+
+// createTokenSource creates an oauth2TokenSource from config (nil for basic auth)
+func createTokenSource(cfg *config.TrinoConfig) oauth2TokenSource {
+	switch cfg.TrinoAuthMode {
+	case "oauth":
+		return createClientCredentialsTokenSource(cfg)
+	case "device-code":
+		return createDeviceCodeTokenSource(cfg)
+	default:
+		return nil
+	}
+}
+
+// createClientCredentialsTokenSource creates a client_credentials token source
+func createClientCredentialsTokenSource(cfg *config.TrinoConfig) oauth2TokenSource {
+
+	var scopes []string
+	if cfg.TrinoOAuthScopes != "" {
+		scopes = strings.Split(cfg.TrinoOAuthScopes, ",")
+		for i, s := range scopes {
+			scopes[i] = strings.TrimSpace(s)
+		}
+	}
+
+	ccConfig := &clientcredentials.Config{
+		ClientID:     cfg.TrinoOAuthClientID,
+		ClientSecret: cfg.TrinoOAuthClientSecret,
+		TokenURL:     cfg.TrinoOAuthTokenURL,
+		Scopes:       scopes,
+	}
+
+	// Use a timeout-bounded HTTP client for token requests to prevent hanging
+	// on unreachable token endpoints
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, httpClient)
+
+	return &realTokenSource{source: ccConfig.TokenSource(ctx)}
+}
+
+// buildDSN constructs the Trino DSN string from config
+func buildDSN(cfg *config.TrinoConfig) string {
+	var dsnURL url.URL
+
+	if cfg.TrinoAuthMode == "oauth" || cfg.TrinoAuthMode == "device-code" {
+		// OAuth/device-code mode: no password in DSN, user is optional for attribution
+		dsnURL = url.URL{
+			Scheme: cfg.Scheme,
+			User:   url.User(cfg.User),
+			Host:   fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		}
+	} else {
+		// Basic auth mode: user:password in DSN
+		dsnURL = url.URL{
+			Scheme: cfg.Scheme,
+			User:   url.UserPassword(cfg.User, cfg.Password),
+			Host:   fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		}
+	}
+
+	params := url.Values{}
+	params.Add("catalog", cfg.Catalog)
+	params.Add("schema", cfg.Schema)
+	params.Add("SSL", fmt.Sprintf("%t", cfg.SSL))
+	params.Add("SSLInsecure", fmt.Sprintf("%t", cfg.SSLInsecure))
+	params.Add("custom_client", "mcp-trino")
+
+	dsnURL.RawQuery = params.Encode()
+	return dsnURL.String()
+}
+
+// headerRoundTripper adds X-Trino-Source, X-Trino-User, and Authorization headers to requests
 type headerRoundTripper struct {
-	base   http.RoundTripper
-	config *config.TrinoConfig
+	base        http.RoundTripper
+	config      *config.TrinoConfig
+	tokenSource oauth2TokenSource
 }
 
 func (t *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
+
+	// Inject OAuth bearer token if token source is configured
+	if t.tokenSource != nil {
+		tok, err := t.tokenSource.Token()
+		if err != nil {
+			return nil, fmt.Errorf("failed to obtain OAuth token for Trino: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+	}
 
 	// Set X-Trino-Source header for query attribution
 	if t.config.TrinoSource != "" {
@@ -116,26 +220,14 @@ type Client struct {
 
 // NewClient creates a new Trino client
 func NewClient(cfg *config.TrinoConfig) (*Client, error) {
-	dsnURL := url.URL{
-		Scheme: cfg.Scheme,
-		User:   url.UserPassword(cfg.User, cfg.Password),
-		Host:   fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-	}
-
-	params := url.Values{}
-	params.Add("catalog", cfg.Catalog)
-	params.Add("schema", cfg.Schema)
-	params.Add("SSL", fmt.Sprintf("%t", cfg.SSL))
-	params.Add("SSLInsecure", fmt.Sprintf("%t", cfg.SSLInsecure))
-	params.Add("custom_client", "mcp-trino")
-
-	dsnURL.RawQuery = params.Encode()
-	dsn := dsnURL.String()
+	dsn := buildDSN(cfg)
+	tokenSource := createTokenSource(cfg)
 
 	httpClient := &http.Client{
 		Transport: &headerRoundTripper{
-			base:   http.DefaultTransport,
-			config: cfg,
+			base:        http.DefaultTransport,
+			config:      cfg,
+			tokenSource: tokenSource,
 		},
 	}
 	if err := trino.RegisterCustomClient("mcp-trino", httpClient); err != nil {

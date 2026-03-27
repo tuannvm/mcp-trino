@@ -49,6 +49,13 @@ type TrinoConfig struct {
 
 	// Query attribution
 	TrinoSource string // Value for X-Trino-Source header (identifies query source to Trino)
+
+	// Trino connection auth mode: "basic" (user/password) or "oauth" (client_credentials)
+	TrinoAuthMode        string // Auth mode for Trino connection
+	TrinoOAuthTokenURL   string // OAuth token endpoint (e.g. https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token)
+	TrinoOAuthClientID   string // OAuth client ID for client_credentials flow
+	TrinoOAuthClientSecret string // OAuth client secret for client_credentials flow
+	TrinoOAuthScopes     string // Comma-separated OAuth scopes (e.g. api://trino/.default)
 }
 
 // NewTrinoConfig creates a new TrinoConfig with values from environment variables or defaults
@@ -130,6 +137,48 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 	if trinoSource == "" {
 		// If explicitly set to empty, use default
 		trinoSource = fmt.Sprintf("mcp-trino/%s", version)
+	}
+
+	// Parse Trino auth mode (basic or oauth)
+	trinoAuthMode := strings.ToLower(getEnv("TRINO_AUTH_MODE", "basic"))
+	if trinoAuthMode == "" {
+		trinoAuthMode = "basic"
+	}
+	trinoOAuthTokenURL := getEnv("TRINO_OAUTH_TOKEN_URL", "")
+	trinoOAuthClientID := getEnv("TRINO_OAUTH_CLIENT_ID", "")
+	trinoOAuthClientSecret := getEnv("TRINO_OAUTH_CLIENT_SECRET", "")
+	trinoOAuthScopes := getEnv("TRINO_OAUTH_SCOPES", "")
+
+	// Validate auth mode
+	validAuthModes := map[string]bool{"basic": true, "oauth": true, "device-code": true}
+	if !validAuthModes[trinoAuthMode] {
+		return nil, fmt.Errorf("invalid TRINO_AUTH_MODE '%s'. Supported modes: basic, oauth, device-code", trinoAuthMode)
+	}
+
+	// Validate OAuth fields when auth mode is oauth (client_credentials)
+	if trinoAuthMode == "oauth" {
+		if trinoOAuthTokenURL == "" {
+			return nil, fmt.Errorf("TRINO_OAUTH_TOKEN_URL is required when TRINO_AUTH_MODE=oauth")
+		}
+		if trinoOAuthClientID == "" {
+			return nil, fmt.Errorf("TRINO_OAUTH_CLIENT_ID is required when TRINO_AUTH_MODE=oauth")
+		}
+		if trinoOAuthClientSecret == "" {
+			return nil, fmt.Errorf("TRINO_OAUTH_CLIENT_SECRET is required when TRINO_AUTH_MODE=oauth")
+		}
+		log.Printf("INFO: Trino auth mode: oauth (client_credentials flow)")
+		log.Printf("INFO: Trino OAuth token URL: %s", trinoOAuthTokenURL)
+	} else if trinoAuthMode == "device-code" {
+		if trinoOAuthTokenURL == "" {
+			return nil, fmt.Errorf("TRINO_OAUTH_TOKEN_URL is required when TRINO_AUTH_MODE=device-code")
+		}
+		if trinoOAuthClientID == "" {
+			return nil, fmt.Errorf("TRINO_OAUTH_CLIENT_ID is required when TRINO_AUTH_MODE=device-code")
+		}
+		log.Printf("INFO: Trino auth mode: device-code (one-time browser auth, cached tokens)")
+		log.Printf("INFO: Trino OAuth token URL: %s", trinoOAuthTokenURL)
+	} else {
+		log.Printf("INFO: Trino auth mode: basic (user/password)")
 	}
 
 	// Validate allowlist formats
@@ -226,6 +275,11 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 		EnableImpersonation: enableImpersonation,
 		ImpersonationField:  impersonationField,
 		TrinoSource:         trinoSource,
+		TrinoAuthMode:          trinoAuthMode,
+		TrinoOAuthTokenURL:     trinoOAuthTokenURL,
+		TrinoOAuthClientID:     trinoOAuthClientID,
+		TrinoOAuthClientSecret: trinoOAuthClientSecret,
+		TrinoOAuthScopes:       trinoOAuthScopes,
 	}, nil
 }
 

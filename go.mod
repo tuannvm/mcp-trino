@@ -6,6 +6,7 @@ require (
 	github.com/mark3labs/mcp-go v0.43.1
 	github.com/trinodb/trino-go-client v0.328.0
 	github.com/tuannvm/oauth-mcp-proxy v1.0.1
+	golang.org/x/oauth2 v0.32.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -32,5 +33,4 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
-	golang.org/x/oauth2 v0.32.0 // indirect
 )

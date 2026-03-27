@@ -2,6 +2,8 @@ package trino
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -624,4 +626,199 @@ func TestGetQueryUsername(t *testing.T) {
 		})
 	}
 
+}
+
+func TestHeaderRoundTripper_BearerTokenInjection(t *testing.T) {
+	tests := []struct {
+		name           string
+		tokenSource    oauth2TokenSource
+		expectedAuth   string
+		expectNoAuth   bool
+	}{
+		{
+			name:         "Injects bearer token when TokenSource is set",
+			tokenSource:  &mockTokenSource{token: "test-access-token-123"},
+			expectedAuth: "Bearer test-access-token-123",
+		},
+		{
+			name:        "No auth header when TokenSource is nil",
+			tokenSource: nil,
+			expectNoAuth: true,
+		},
+		{
+			name:         "Handles token refresh (new token)",
+			tokenSource:  &mockTokenSource{token: "refreshed-token-456"},
+			expectedAuth: "Bearer refreshed-token-456",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.TrinoConfig{
+				TrinoSource: "test-source",
+			}
+
+			rt := &headerRoundTripper{
+				base:        &captureRoundTripper{},
+				config:      cfg,
+				tokenSource: tt.tokenSource,
+			}
+
+			req, _ := http.NewRequest("GET", "https://trino.example.com/v1/statement", nil)
+			_, _ = rt.RoundTrip(req)
+
+			captured := rt.base.(*captureRoundTripper).lastReq
+			authHeader := captured.Header.Get("Authorization")
+
+			if tt.expectNoAuth {
+				if authHeader != "" {
+					t.Errorf("Expected no Authorization header, got %q", authHeader)
+				}
+			} else {
+				if authHeader != tt.expectedAuth {
+					t.Errorf("Authorization = %q, want %q", authHeader, tt.expectedAuth)
+				}
+			}
+		})
+	}
+}
+
+func TestHeaderRoundTripper_BearerTokenError(t *testing.T) {
+	cfg := &config.TrinoConfig{
+		TrinoSource: "test-source",
+	}
+
+	rt := &headerRoundTripper{
+		base:        &captureRoundTripper{},
+		config:      cfg,
+		tokenSource: &mockTokenSource{err: fmt.Errorf("token expired")},
+	}
+
+	req, _ := http.NewRequest("GET", "https://trino.example.com/v1/statement", nil)
+	_, err := rt.RoundTrip(req)
+	if err == nil {
+		t.Fatal("Expected error when token source fails, got nil")
+	}
+	if !strings.Contains(err.Error(), "token expired") {
+		t.Errorf("Error = %q, expected to contain 'token expired'", err.Error())
+	}
+}
+
+func TestBuildDSN_OAuthMode(t *testing.T) {
+	cfg := &config.TrinoConfig{
+		Host:          "trino.example.com",
+		Port:          443,
+		User:          "service-account",
+		Password:      "should-be-ignored",
+		Catalog:       "hive",
+		Schema:        "default",
+		Scheme:        "https",
+		SSL:           true,
+		SSLInsecure:   false,
+		TrinoAuthMode: "oauth",
+	}
+
+	dsn := buildDSN(cfg)
+
+	// OAuth mode: DSN should NOT contain password
+	if strings.Contains(dsn, "should-be-ignored") {
+		t.Error("OAuth mode DSN should not contain password")
+	}
+	// Should still contain the host
+	if !strings.Contains(dsn, "trino.example.com") {
+		t.Error("DSN should contain host")
+	}
+	// Should contain SSL params
+	if !strings.Contains(dsn, "SSL=true") {
+		t.Error("DSN should contain SSL=true")
+	}
+}
+
+func TestBuildDSN_BasicMode(t *testing.T) {
+	cfg := &config.TrinoConfig{
+		Host:          "trino.example.com",
+		Port:          8080,
+		User:          "myuser",
+		Password:      "mypassword",
+		Catalog:       "memory",
+		Schema:        "default",
+		Scheme:        "https",
+		SSL:           true,
+		SSLInsecure:   true,
+		TrinoAuthMode: "basic",
+	}
+
+	dsn := buildDSN(cfg)
+
+	// Basic mode: DSN should contain user:password
+	if !strings.Contains(dsn, "myuser") {
+		t.Error("Basic mode DSN should contain username")
+	}
+	if !strings.Contains(dsn, "mypassword") {
+		t.Error("Basic mode DSN should contain password")
+	}
+}
+
+func TestCreateTokenSource(t *testing.T) {
+	cfg := &config.TrinoConfig{
+		TrinoAuthMode:        "oauth",
+		TrinoOAuthTokenURL:   "https://login.microsoftonline.com/test-tenant/oauth2/v2.0/token",
+		TrinoOAuthClientID:   "test-client-id",
+		TrinoOAuthClientSecret: "test-client-secret",
+		TrinoOAuthScopes:     "api://trino/.default,openid",
+	}
+
+	ts := createTokenSource(cfg)
+	if ts == nil {
+		t.Fatal("Expected non-nil TokenSource for oauth config")
+	}
+}
+
+func TestCreateTokenSource_BasicMode(t *testing.T) {
+	cfg := &config.TrinoConfig{
+		TrinoAuthMode: "basic",
+	}
+
+	ts := createTokenSource(cfg)
+	if ts != nil {
+		t.Fatal("Expected nil TokenSource for basic auth mode")
+	}
+}
+
+func TestCreateTokenSource_NoScopes(t *testing.T) {
+	cfg := &config.TrinoConfig{
+		TrinoAuthMode:        "oauth",
+		TrinoOAuthTokenURL:   "https://login.microsoftonline.com/test/oauth2/v2.0/token",
+		TrinoOAuthClientID:   "id",
+		TrinoOAuthClientSecret: "secret",
+		TrinoOAuthScopes:     "",
+	}
+
+	ts := createTokenSource(cfg)
+	if ts == nil {
+		t.Fatal("Expected non-nil TokenSource even without scopes")
+	}
+}
+
+// mockTokenSource implements oauth2TokenSource for testing
+type mockTokenSource struct {
+	token string
+	err   error
+}
+
+func (m *mockTokenSource) Token() (*oauth2Token, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &oauth2Token{AccessToken: m.token}, nil
+}
+
+// captureRoundTripper captures the last request for inspection
+type captureRoundTripper struct {
+	lastReq *http.Request
+}
+
+func (c *captureRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.lastReq = req
+	return &http.Response{StatusCode: 200}, nil
 }

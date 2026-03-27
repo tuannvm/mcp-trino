@@ -93,6 +93,16 @@ OAuth 2.1 authentication is provided by the external **[oauth-mcp-proxy](https:/
 - **Providers**: HMAC, Okta, Google, Azure AD
 - **Documentation**: See [docs/oauth.md](docs/oauth.md) and [oauth-mcp-proxy docs](https://github.com/tuannvm/oauth-mcp-proxy#readme)
 
+### Trino Connection OAuth (Client Credentials)
+
+For Trino servers that require OAuth/JWT bearer tokens (Azure AD, Okta, etc.):
+- **Auth Mode**: `TRINO_AUTH_MODE=oauth` enables client_credentials flow
+- **Token Injection**: `internal/trino/client.go` - `headerRoundTripper` injects `Authorization: Bearer` header
+- **Token Source**: `golang.org/x/oauth2/clientcredentials` provides auto-refreshing tokens
+- **Config**: `TRINO_OAUTH_TOKEN_URL`, `TRINO_OAUTH_CLIENT_ID`, `TRINO_OAUTH_CLIENT_SECRET`, `TRINO_OAUTH_SCOPES`
+- **CLI Profiles**: Profiles in `~/.config/trino/config.yaml` support `auth_mode`, `oauth_token_url`, etc.
+- **No Browser Popup**: Pure machine-to-machine flow, works in STDIO mode
+
 ### Transport Support
 
 - **STDIO Transport**: Direct MCP client integration (default)
@@ -123,6 +133,13 @@ All tools return JSON-formatted responses and handle parameter validation:
 - `TRINO_SCHEME` (http/https), `TRINO_SSL`, `TRINO_SSL_INSECURE`
 - `TRINO_ALLOW_WRITE_QUERIES` (default: false for security)
 - `TRINO_QUERY_TIMEOUT` (default: 30 seconds, validated > 0)
+
+**Trino Connection OAuth (client_credentials flow):**
+- `TRINO_AUTH_MODE` (basic/oauth, default: basic) - Auth mode for Trino connection
+- `TRINO_OAUTH_TOKEN_URL` - Token endpoint (required when oauth)
+- `TRINO_OAUTH_CLIENT_ID` - OAuth client ID (required when oauth)
+- `TRINO_OAUTH_CLIENT_SECRET` - OAuth client secret (required when oauth)
+- `TRINO_OAUTH_SCOPES` - Comma-separated scopes (optional)
 
 **MCP Server:**
 - `MCP_TRANSPORT` (stdio/http), `MCP_PORT` (default: 8080), `MCP_HOST`
