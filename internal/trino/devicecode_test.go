@@ -162,11 +162,12 @@ func TestTokenCacheLoadSave(t *testing.T) {
 	cachePath := filepath.Join(tmpDir, "token-cache.json")
 
 	ts := &deviceCodeTokenSource{
-		cachePath: cachePath,
-	}
+		oauthCacheHelper: oauthCacheHelper{cachePath: cachePath,
+	},
+}
 
 	// Initially no cache
-	if tok := ts.loadCache(); tok != nil {
+	if tok := ts.loadCacheShared(); tok != nil {
 		t.Error("Expected nil from empty cache")
 	}
 
@@ -177,7 +178,7 @@ func TestTokenCacheLoadSave(t *testing.T) {
 		TokenType:    "Bearer",
 		Expiry:       time.Now().Add(1 * time.Hour),
 	}
-	ts.saveCache(token)
+	ts.saveCacheShared(token)
 
 	// Verify file exists with restricted permissions
 	info, err := os.Stat(cachePath)
@@ -189,7 +190,7 @@ func TestTokenCacheLoadSave(t *testing.T) {
 	}
 
 	// Load it back
-	loaded := ts.loadCache()
+	loaded := ts.loadCacheShared()
 	if loaded == nil {
 		t.Fatal("Failed to load cached token")
 	}
@@ -206,8 +207,9 @@ func TestTokenCacheExpired(t *testing.T) {
 	cachePath := filepath.Join(tmpDir, "token-cache.json")
 
 	ts := &deviceCodeTokenSource{
-		cachePath: cachePath,
-	}
+		oauthCacheHelper: oauthCacheHelper{cachePath: cachePath,
+	},
+}
 
 	// Save an expired token with a refresh token
 	token := &oauth2.Token{
@@ -216,9 +218,9 @@ func TestTokenCacheExpired(t *testing.T) {
 		TokenType:    "Bearer",
 		Expiry:       time.Now().Add(-1 * time.Hour), // expired
 	}
-	ts.saveCache(token)
+	ts.saveCacheShared(token)
 
-	loaded := ts.loadCache()
+	loaded := ts.loadCacheShared()
 	if loaded == nil {
 		t.Fatal("Should load expired token (for refresh)")
 	}
@@ -302,14 +304,16 @@ func TestDeviceCodeRefreshToken(t *testing.T) {
 	defer server.Close()
 
 	ts := &deviceCodeTokenSource{
-		clientID:   "test-client",
-		tokenURL:   server.URL + "/token",
-		scopes:     []string{"openid"},
-		httpClient: server.Client(),
+		oauthCacheHelper: oauthCacheHelper{
+			clientID:   "test-client",
+			tokenURL:   server.URL + "/token",
+			scopes:     []string{"openid"},
+			httpClient: server.Client(),
+		},
 	}
 
 	// Test successful refresh
-	token, err := ts.refreshToken("test-refresh-token")
+	token, err := ts.refreshTokenShared("test-refresh-token")
 	if err != nil {
 		t.Fatalf("refreshToken() failed: %v", err)
 	}
@@ -321,7 +325,7 @@ func TestDeviceCodeRefreshToken(t *testing.T) {
 	}
 
 	// Test failed refresh — should produce structured oauthError
-	_, err = ts.refreshToken("bad-token")
+	_, err = ts.refreshTokenShared("bad-token")
 	if err == nil {
 		t.Fatal("Expected error for bad refresh token")
 	}
@@ -347,12 +351,14 @@ func TestDeviceCodeRefreshToken_PreservesRefreshToken(t *testing.T) {
 	defer server.Close()
 
 	ts := &deviceCodeTokenSource{
-		clientID:   "test",
-		tokenURL:   server.URL,
-		httpClient: server.Client(),
+		oauthCacheHelper: oauthCacheHelper{
+			clientID:   "test",
+			tokenURL:   server.URL,
+			httpClient: server.Client(),
+		},
 	}
 
-	token, err := ts.refreshToken("original-refresh-token")
+	token, err := ts.refreshTokenShared("original-refresh-token")
 	if err != nil {
 		t.Fatalf("refreshToken() failed: %v", err)
 	}
@@ -369,11 +375,13 @@ func TestDoTokenRequest_ServerError(t *testing.T) {
 	defer server.Close()
 
 	ts := &deviceCodeTokenSource{
-		tokenURL:   server.URL,
-		httpClient: server.Client(),
+		oauthCacheHelper: oauthCacheHelper{
+			tokenURL:   server.URL,
+			httpClient: server.Client(),
+		},
 	}
 
-	_, err := ts.doTokenRequest(nil)
+	_, err := ts.doTokenRequestShared(nil)
 	if err == nil {
 		t.Fatal("Expected error for 500 response")
 	}
@@ -393,11 +401,13 @@ func TestDoTokenRequest_OAuthError(t *testing.T) {
 	defer server.Close()
 
 	ts := &deviceCodeTokenSource{
-		tokenURL:   server.URL,
-		httpClient: server.Client(),
+		oauthCacheHelper: oauthCacheHelper{
+			tokenURL:   server.URL,
+			httpClient: server.Client(),
+		},
 	}
 
-	_, err := ts.doTokenRequest(nil)
+	_, err := ts.doTokenRequestShared(nil)
 	if err == nil {
 		t.Fatal("Expected error")
 	}
@@ -421,9 +431,11 @@ func TestPollForToken_MinExpiry(t *testing.T) {
 	defer server.Close()
 
 	ts := &deviceCodeTokenSource{
-		clientID:   "test",
-		tokenURL:   server.URL,
-		httpClient: server.Client(),
+		oauthCacheHelper: oauthCacheHelper{
+			clientID:   "test",
+			tokenURL:   server.URL,
+			httpClient: server.Client(),
+		},
 	}
 
 	token, err := ts.pollForToken("device-code")
@@ -451,8 +463,10 @@ func TestDeviceCodeTokenSource_CachedValidToken(t *testing.T) {
 	_ = os.WriteFile(cachePath, data, 0600)
 
 	ts := &deviceCodeTokenSource{
-		clientID:  "test",
-		cachePath: cachePath,
+		oauthCacheHelper: oauthCacheHelper{
+			clientID:  "test",
+			cachePath: cachePath,
+		},
 	}
 
 	// Should return cached token without any HTTP calls
@@ -496,11 +510,13 @@ func TestDeviceCodeTokenSource_RefreshExpiredCache(t *testing.T) {
 	_ = os.WriteFile(cachePath, data, 0600)
 
 	ts := &deviceCodeTokenSource{
-		clientID:   "test",
-		tokenURL:   server.URL + "/token",
-		scopes:     []string{"openid"},
-		cachePath:  cachePath,
-		httpClient: server.Client(),
+		oauthCacheHelper: oauthCacheHelper{
+			clientID:   "test",
+			tokenURL:   server.URL + "/token",
+			scopes:     []string{"openid"},
+			cachePath:  cachePath,
+			httpClient: server.Client(),
+		},
 	}
 
 	token, err := ts.Token()

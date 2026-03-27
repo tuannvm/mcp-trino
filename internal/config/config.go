@@ -150,9 +150,9 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 	trinoOAuthScopes := getEnv("TRINO_OAUTH_SCOPES", "")
 
 	// Validate auth mode
-	validAuthModes := map[string]bool{"basic": true, "oauth": true, "device-code": true}
+	validAuthModes := map[string]bool{"basic": true, "oauth": true, "device-code": true, "auth-code": true}
 	if !validAuthModes[trinoAuthMode] {
-		return nil, fmt.Errorf("invalid TRINO_AUTH_MODE '%s'. Supported modes: basic, oauth, device-code", trinoAuthMode)
+		return nil, fmt.Errorf("invalid TRINO_AUTH_MODE '%s'. Supported modes: basic, oauth, device-code, auth-code", trinoAuthMode)
 	}
 
 	// Validate OAuth fields when auth mode is oauth (client_credentials)
@@ -176,6 +176,15 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 			return nil, fmt.Errorf("TRINO_OAUTH_CLIENT_ID is required when TRINO_AUTH_MODE=device-code")
 		}
 		log.Printf("INFO: Trino auth mode: device-code (one-time browser auth, cached tokens)")
+		log.Printf("INFO: Trino OAuth token URL: %s", trinoOAuthTokenURL)
+	} else if trinoAuthMode == "auth-code" {
+		if trinoOAuthTokenURL == "" {
+			return nil, fmt.Errorf("TRINO_OAUTH_TOKEN_URL is required when TRINO_AUTH_MODE=auth-code")
+		}
+		if trinoOAuthClientID == "" {
+			return nil, fmt.Errorf("TRINO_OAUTH_CLIENT_ID is required when TRINO_AUTH_MODE=auth-code")
+		}
+		log.Printf("INFO: Trino auth mode: auth-code (browser redirect + PKCE, cached tokens)")
 		log.Printf("INFO: Trino OAuth token URL: %s", trinoOAuthTokenURL)
 	} else {
 		log.Printf("INFO: Trino auth mode: basic (user/password)")

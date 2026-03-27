@@ -63,17 +63,12 @@ const minTokenExpiry = 60 // seconds
 
 // deviceCodeTokenSource implements oauth2TokenSource using the device code flow
 type deviceCodeTokenSource struct {
-	clientID     string
-	clientSecret string
-	tokenURL     string
-	scopes       []string
-	cachePath    string
+	oauthCacheHelper
 
 	mu    sync.Mutex
 	token *oauth2.Token
 
-	// For testing: override the HTTP client and device code URL
-	httpClient    *http.Client
+	// For testing: override the device code URL
 	deviceCodeURL string
 }
 
@@ -95,12 +90,14 @@ func createDeviceCodeTokenSource(cfg *config.TrinoConfig) oauth2TokenSource {
 	migrateLegacyCache(cachePath)
 
 	ts := &deviceCodeTokenSource{
-		clientID:      cfg.TrinoOAuthClientID,
-		clientSecret:  cfg.TrinoOAuthClientSecret,
-		tokenURL:      cfg.TrinoOAuthTokenURL,
-		scopes:        scopes,
-		cachePath:     cachePath,
-		httpClient:    &http.Client{Timeout: 30 * time.Second},
+		oauthCacheHelper: oauthCacheHelper{
+			clientID:     cfg.TrinoOAuthClientID,
+			clientSecret: cfg.TrinoOAuthClientSecret,
+			tokenURL:     cfg.TrinoOAuthTokenURL,
+			scopes:       scopes,
+			cachePath:    cachePath,
+			httpClient:   &http.Client{Timeout: 30 * time.Second},
+		},
 		deviceCodeURL: deviceCodeURL,
 	}
 	return ts
@@ -194,17 +191,17 @@ func (d *deviceCodeTokenSource) Token() (*oauth2Token, error) {
 	}
 
 	// Try to load from disk cache and refresh
-	if cached := d.loadCache(); cached != nil {
+	if cached := d.loadCacheShared(); cached != nil {
 		if cached.Valid() {
 			d.token = cached
 			return &oauth2Token{AccessToken: cached.AccessToken}, nil
 		}
 		// Try to refresh using the refresh token
 		if cached.RefreshToken != "" {
-			refreshed, err := d.refreshToken(cached.RefreshToken)
+			refreshed, err := d.refreshTokenShared(cached.RefreshToken)
 			if err == nil {
 				d.token = refreshed
-				d.saveCache(refreshed)
+				d.saveCacheShared(refreshed)
 				return &oauth2Token{AccessToken: refreshed.AccessToken}, nil
 			}
 			log.Printf("Token refresh failed, re-authenticating: %v", err)
@@ -217,7 +214,7 @@ func (d *deviceCodeTokenSource) Token() (*oauth2Token, error) {
 		return nil, fmt.Errorf("device code authentication failed: %w", err)
 	}
 	d.token = token
-	d.saveCache(token)
+	d.saveCacheShared(token)
 	return &oauth2Token{AccessToken: token.AccessToken}, nil
 }
 
@@ -292,36 +289,6 @@ func (d *deviceCodeTokenSource) doDeviceCodeFlow() (*oauth2.Token, error) {
 	return nil, fmt.Errorf("device code flow timed out after %d seconds", dcResp.ExpiresIn)
 }
 
-// doTokenRequest sends a POST to the token endpoint and parses the response
-func (d *deviceCodeTokenSource) doTokenRequest(data url.Values) (*tokenResponse, error) {
-	resp, err := d.httpClient.PostForm(d.tokenURL, data)
-	if err != nil {
-		return nil, fmt.Errorf("token request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read token response: %w", err)
-	}
-
-	// Check for non-JSON error responses (e.g., 5xx with HTML body)
-	if resp.StatusCode >= 500 {
-		return nil, fmt.Errorf("token endpoint returned HTTP %d: %s", resp.StatusCode, string(body))
-	}
-
-	var tokenResp tokenResponse
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return nil, fmt.Errorf("failed to parse token response (HTTP %d): %w", resp.StatusCode, err)
-	}
-
-	if tokenResp.Error != "" {
-		return nil, &oauthError{Code: tokenResp.Error, Description: tokenResp.ErrorDesc}
-	}
-
-	return &tokenResp, nil
-}
-
 // pollForToken polls the token endpoint during device code flow
 func (d *deviceCodeTokenSource) pollForToken(deviceCode string) (*oauth2.Token, error) {
 	data := url.Values{
@@ -333,7 +300,7 @@ func (d *deviceCodeTokenSource) pollForToken(deviceCode string) (*oauth2.Token, 
 		data.Set("client_secret", d.clientSecret)
 	}
 
-	tokenResp, err := d.doTokenRequest(data)
+	tokenResp, err := d.doTokenRequestShared(data)
 	if err != nil {
 		return nil, err
 	}
@@ -353,102 +320,4 @@ func (d *deviceCodeTokenSource) pollForToken(deviceCode string) (*oauth2.Token, 
 		TokenType:    tokenResp.TokenType,
 		Expiry:       time.Now().Add(time.Duration(expiresIn) * time.Second),
 	}, nil
-}
-
-// refreshToken uses a refresh token to get a new access token
-func (d *deviceCodeTokenSource) refreshToken(refreshTok string) (*oauth2.Token, error) {
-	data := url.Values{
-		"client_id":     {d.clientID},
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {refreshTok},
-		"scope":         {strings.Join(d.scopes, " ")},
-	}
-	if d.clientSecret != "" {
-		data.Set("client_secret", d.clientSecret)
-	}
-
-	tokenResp, err := d.doTokenRequest(data)
-	if err != nil {
-		return nil, fmt.Errorf("refresh failed: %w", err)
-	}
-
-	// Preserve the refresh token if a new one wasn't issued
-	rt := tokenResp.RefreshToken
-	if rt == "" {
-		rt = refreshTok
-	}
-
-	expiresIn := tokenResp.ExpiresIn
-	if expiresIn < minTokenExpiry {
-		expiresIn = minTokenExpiry
-	}
-
-	return &oauth2.Token{
-		AccessToken:  tokenResp.AccessToken,
-		RefreshToken: rt,
-		TokenType:    tokenResp.TokenType,
-		Expiry:       time.Now().Add(time.Duration(expiresIn) * time.Second),
-	}, nil
-}
-
-// loadCache loads the cached token from disk
-func (d *deviceCodeTokenSource) loadCache() *oauth2.Token {
-	if d.cachePath == "" {
-		return nil
-	}
-
-	data, err := os.ReadFile(d.cachePath)
-	if err != nil {
-		return nil
-	}
-
-	var cache tokenCache
-	if err := json.Unmarshal(data, &cache); err != nil {
-		return nil
-	}
-
-	return &oauth2.Token{
-		AccessToken:  cache.AccessToken,
-		RefreshToken: cache.RefreshToken,
-		TokenType:    cache.TokenType,
-		Expiry:       cache.ExpiresAt,
-	}
-}
-
-// saveCache saves the token to disk cache
-func (d *deviceCodeTokenSource) saveCache(token *oauth2.Token) {
-	if d.cachePath == "" || token == nil {
-		return
-	}
-
-	cache := tokenCache{
-		AccessToken:  token.AccessToken,
-		RefreshToken: token.RefreshToken,
-		TokenType:    token.TokenType,
-		ExpiresAt:    token.Expiry,
-	}
-
-	data, err := json.MarshalIndent(cache, "", "  ")
-	if err != nil {
-		log.Printf("WARNING: Failed to marshal token cache: %v", err)
-		return
-	}
-
-	// Create directory if needed
-	dir := filepath.Dir(d.cachePath)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		log.Printf("WARNING: Failed to create token cache directory: %v", err)
-		return
-	}
-
-	// Write with restricted permissions (user-only read/write)
-	if err := os.WriteFile(d.cachePath, data, 0600); err != nil {
-		log.Printf("WARNING: Failed to write token cache: %v", err)
-		return
-	}
-
-	// Harden permissions in case file already existed with broader perms
-	if err := os.Chmod(d.cachePath, 0600); err != nil {
-		log.Printf("WARNING: Failed to set token cache permissions: %v", err)
-	}
 }

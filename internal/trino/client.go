@@ -115,6 +115,8 @@ func createTokenSource(cfg *config.TrinoConfig) oauth2TokenSource {
 		return createClientCredentialsTokenSource(cfg)
 	case "device-code":
 		return createDeviceCodeTokenSource(cfg)
+	case "auth-code":
+		return createAuthCodeTokenSource(cfg)
 	default:
 		return nil
 	}
@@ -150,7 +152,7 @@ func createClientCredentialsTokenSource(cfg *config.TrinoConfig) oauth2TokenSour
 func buildDSN(cfg *config.TrinoConfig) string {
 	var dsnURL url.URL
 
-	if cfg.TrinoAuthMode == "oauth" || cfg.TrinoAuthMode == "device-code" {
+	if cfg.TrinoAuthMode == "oauth" || cfg.TrinoAuthMode == "device-code" || cfg.TrinoAuthMode == "auth-code" {
 		// OAuth/device-code mode: no password in DSN, user is optional for attribution
 		dsnURL = url.URL{
 			Scheme: cfg.Scheme,

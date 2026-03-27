@@ -22,7 +22,7 @@ type TrinoProfileConfig struct {
 		Insecure bool  `yaml:"insecure"`
 	} `yaml:"ssl"`
 	// OAuth client_credentials auth for Trino connection
-	AuthMode        string `yaml:"auth_mode,omitempty"`         // "basic" (default), "oauth", or "device-code"
+	AuthMode        string `yaml:"auth_mode,omitempty"`         // "basic" (default), "oauth", "device-code", or "auth-code"
 	OAuthTokenURL   string `yaml:"oauth_token_url,omitempty"`   // Token endpoint URL
 	OAuthClientID   string `yaml:"oauth_client_id,omitempty"`   // Client ID
 	OAuthClientSecret string `yaml:"oauth_client_secret,omitempty"` // Client secret
@@ -387,7 +387,7 @@ func (c *CLIConfig) ApplyToEnv(profileName string) error {
 		_ = os.Setenv("TRINO_AUTH_MODE", "basic")
 	}
 	// Set OAuth fields from profile, or clear stale ones when switching to basic
-	if profile.AuthMode == "oauth" || profile.AuthMode == "device-code" {
+	if profile.AuthMode == "oauth" || profile.AuthMode == "device-code" || profile.AuthMode == "auth-code" {
 		setEnvIfValue("TRINO_OAUTH_TOKEN_URL", profile.OAuthTokenURL)
 		setEnvIfValue("TRINO_OAUTH_CLIENT_ID", profile.OAuthClientID)
 		setEnvIfValue("TRINO_OAUTH_CLIENT_SECRET", profile.OAuthClientSecret)
