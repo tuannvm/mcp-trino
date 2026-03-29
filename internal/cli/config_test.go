@@ -225,6 +225,26 @@ func TestApplyToEnv_SSLNotSet(t *testing.T) {
 	}
 }
 
+func TestApplyToEnv_AuthMode(t *testing.T) {
+	_ = os.Unsetenv("TRINO_AUTH_MODE")
+
+	cfg := &CLIConfig{
+		Current: "test-profile",
+		Profiles: map[string]TrinoProfileConfig{
+			"test-profile": {
+				Host:     "testhost",
+				AuthMode: "external",
+			},
+		},
+	}
+
+	_ = cfg.ApplyToEnv("test-profile")
+
+	if got := os.Getenv("TRINO_AUTH_MODE"); got != "external" {
+		t.Fatalf("expected TRINO_AUTH_MODE='external', got %q", got)
+	}
+}
+
 func TestLoadCLIConfig_MissingFile(t *testing.T) {
 	// Use a temp directory to ensure config doesn't exist
 	tmpDir := t.TempDir()

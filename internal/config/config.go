@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+const (
+	AuthModeBasic    = "basic"
+	AuthModeExternal = "external"
+)
+
 // TrinoConfig holds Trino connection parameters
 type TrinoConfig struct {
 	// Basic connection parameters
@@ -24,6 +29,7 @@ type TrinoConfig struct {
 	AllowWriteQueries bool          // Controls whether non-read-only SQL queries are allowed
 	QueryTimeout      time.Duration // Query execution timeout
 	MaxRows           int           // Maximum number of rows returned per query (0 = unlimited)
+	AuthMode          string        // Trino authentication mode: "basic" or "external"
 
 	// OAuth mode configuration
 	OAuthEnabled  bool   // Enable OAuth 2.1 authentication
@@ -131,6 +137,19 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 		// If explicitly set to empty, use default
 		trinoSource = fmt.Sprintf("mcp-trino/%s", version)
 	}
+	authMode := strings.ToLower(getEnv("TRINO_AUTH_MODE", AuthModeBasic))
+	switch authMode {
+	case "", AuthModeBasic:
+		authMode = AuthModeBasic
+	case AuthModeExternal:
+		if strings.EqualFold(getEnv("MCP_TRANSPORT", "stdio"), "http") {
+			log.Println("WARNING: TRINO_AUTH_MODE=external is designed for local/browser-mediated use. " +
+				"MCP_TRANSPORT=http may not work correctly for shared or remote deployments.")
+		}
+		log.Println("INFO: Trino auth mode: external (Trino browser challenge with cached bearer token)")
+	default:
+		return nil, fmt.Errorf("invalid TRINO_AUTH_MODE '%s'. Supported modes: basic, external", authMode)
+	}
 
 	// Validate allowlist formats
 	if err := validateAllowlist("TRINO_ALLOWED_SCHEMAS", allowedSchemas, 1); err != nil { // Must have catalog.schema format
@@ -211,6 +230,7 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 		AllowWriteQueries:   allowWriteQueries,
 		QueryTimeout:        queryTimeout,
 		MaxRows:             maxRows,
+		AuthMode:            authMode,
 		OAuthEnabled:        oauthEnabled,
 		OAuthMode:           oauthMode,
 		OAuthProvider:       oauthProvider,

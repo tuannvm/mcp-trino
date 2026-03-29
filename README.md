@@ -251,7 +251,35 @@ For client integration and tool documentation, see [Integration Guide](docs/inte
 
 ## Configuration
 
-**Key Variables:** `TRINO_HOST`, `TRINO_USER`, `TRINO_SCHEME`, `MCP_TRANSPORT`, `OAUTH_PROVIDER`
+**Key Variables:** `TRINO_HOST`, `TRINO_USER`, `TRINO_SCHEME`, `TRINO_AUTH_MODE`, `MCP_TRANSPORT`, `OAUTH_PROVIDER`
+
+**Local Trino Browser Auth:**
+
+```bash
+# Local-only mode that uses Trino's WWW-Authenticate browser challenge
+# mcp-trino opens the browser URL from x_redirect_server, polls x_token_server,
+# then caches the returned bearer token for reuse.
+export TRINO_HOST=trino.example.com
+export TRINO_PORT=443
+export TRINO_SCHEME=https
+export TRINO_USER=my.user
+export TRINO_AUTH_MODE=external
+```
+
+Configuration file example:
+
+```yaml
+current: default
+profiles:
+  default:
+    host: trino.example.com
+    port: 443
+    user: my.user
+    auth_mode: external
+    ssl:
+      enabled: true
+      insecure: false
+```
 
 **OAuth Configuration:**
 

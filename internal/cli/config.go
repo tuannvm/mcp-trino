@@ -14,6 +14,7 @@ type TrinoProfileConfig struct {
 	Port     int    `yaml:"port"`
 	User     string `yaml:"user"`
 	Password string `yaml:"password"`
+	AuthMode string `yaml:"auth_mode,omitempty"`
 	Catalog  string `yaml:"catalog"`
 	Schema   string `yaml:"schema"`
 	Source   string `yaml:"source"`
@@ -208,6 +209,7 @@ func (c *CLIConfig) migrateLegacyConfig() error {
 				Port:     c.Trino.Port,
 				User:     c.Trino.User,
 				Password: c.Trino.Password,
+				AuthMode: "",
 				Catalog:  c.Trino.Catalog,
 				Schema:   c.Trino.Schema,
 				Source:   c.Trino.Source,
@@ -348,6 +350,9 @@ func (c *CLIConfig) ApplyToEnv(profileName string) error {
 	}
 	setEnvIfValue("TRINO_USER", profile.User)
 	setEnvIfValue("TRINO_PASSWORD", profile.Password)
+	if profile.AuthMode != "" {
+		setEnvIfValue("TRINO_AUTH_MODE", profile.AuthMode)
+	}
 	setEnvIfValue("TRINO_CATALOG", profile.Catalog)
 	setEnvIfValue("TRINO_SCHEMA", profile.Schema)
 	if profile.Source != "" {

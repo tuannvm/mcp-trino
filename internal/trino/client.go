@@ -1,9 +1,11 @@
 package trino
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -85,26 +87,89 @@ const (
 
 // headerRoundTripper adds X-Trino-Source and X-Trino-User headers to requests
 type headerRoundTripper struct {
-	base   http.RoundTripper
-	config *config.TrinoConfig
+	base         http.RoundTripper
+	config       *config.TrinoConfig
+	tokenManager bearerTokenManager
 }
 
 func (t *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	req = req.Clone(req.Context())
-
-	// Set X-Trino-Source header for query attribution
-	if t.config.TrinoSource != "" {
-		req.Header.Set("X-Trino-Source", t.config.TrinoSource)
+	bodyBytes, err := readRequestBody(req)
+	if err != nil {
+		return nil, err
 	}
 
-	// Set X-Trino-User header if impersonation is enabled
+	token := ""
+	if t.tokenManager != nil {
+		token = t.tokenManager.CurrentToken()
+	}
+
+	resp, err := t.base.RoundTrip(t.cloneRequest(req, bodyBytes, token))
+	if err != nil || t.tokenManager == nil || resp.StatusCode != http.StatusUnauthorized {
+		return resp, err
+	}
+
+	challenge, challengeErr := parseBearerAuthChallenge(resp.Header)
+	if challengeErr != nil && token != "" {
+		_ = resp.Body.Close()
+		t.tokenManager.InvalidateToken()
+		resp, err = t.base.RoundTrip(t.cloneRequest(req, bodyBytes, ""))
+		if err != nil || resp.StatusCode != http.StatusUnauthorized {
+			return resp, err
+		}
+		challenge, challengeErr = parseBearerAuthChallenge(resp.Header)
+	}
+	if challengeErr != nil {
+		return resp, nil
+	}
+
+	_ = resp.Body.Close()
+
+	freshToken, err := t.tokenManager.AcquireToken(challenge)
+	if err != nil {
+		return nil, fmt.Errorf("failed to complete Trino external authentication: %w", err)
+	}
+
+	return t.base.RoundTrip(t.cloneRequest(req, bodyBytes, freshToken))
+}
+
+func (t *headerRoundTripper) cloneRequest(req *http.Request, body []byte, token string) *http.Request {
+	cloned := req.Clone(req.Context())
+	if body != nil {
+		cloned.Body = io.NopCloser(bytes.NewReader(body))
+		cloned.ContentLength = int64(len(body))
+	} else {
+		cloned.Body = nil
+	}
+
+	if token != "" {
+		cloned.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	if t.config.TrinoSource != "" {
+		cloned.Header.Set("X-Trino-Source", t.config.TrinoSource)
+	}
+
 	if t.config.EnableImpersonation {
 		if user, ok := req.Context().Value(impersonatedUserKey).(string); ok && user != "" {
-			req.Header.Set("X-Trino-User", user)
+			cloned.Header.Set("X-Trino-User", user)
 		}
 	}
 
-	return t.base.RoundTrip(req)
+	return cloned
+}
+
+func readRequestBody(req *http.Request) ([]byte, error) {
+	if req.Body == nil {
+		return nil, nil
+	}
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read request body for retry: %w", err)
+	}
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.ContentLength = int64(len(body))
+	return body, nil
 }
 
 // Client is a wrapper around Trino client
@@ -116,26 +181,14 @@ type Client struct {
 
 // NewClient creates a new Trino client
 func NewClient(cfg *config.TrinoConfig) (*Client, error) {
-	dsnURL := url.URL{
-		Scheme: cfg.Scheme,
-		User:   url.UserPassword(cfg.User, cfg.Password),
-		Host:   fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-	}
-
-	params := url.Values{}
-	params.Add("catalog", cfg.Catalog)
-	params.Add("schema", cfg.Schema)
-	params.Add("SSL", fmt.Sprintf("%t", cfg.SSL))
-	params.Add("SSLInsecure", fmt.Sprintf("%t", cfg.SSLInsecure))
-	params.Add("custom_client", "mcp-trino")
-
-	dsnURL.RawQuery = params.Encode()
-	dsn := dsnURL.String()
+	dsn := buildDSN(cfg)
+	tokenManager := createBearerTokenManager(cfg)
 
 	httpClient := &http.Client{
 		Transport: &headerRoundTripper{
-			base:   http.DefaultTransport,
-			config: cfg,
+			base:         http.DefaultTransport,
+			config:       cfg,
+			tokenManager: tokenManager,
 		},
 	}
 	if err := trino.RegisterCustomClient("mcp-trino", httpClient); err != nil {
@@ -173,6 +226,29 @@ func NewClient(cfg *config.TrinoConfig) (*Client, error) {
 		config:  cfg,
 		timeout: cfg.QueryTimeout,
 	}, nil
+}
+
+func buildDSN(cfg *config.TrinoConfig) string {
+	userInfo := url.UserPassword(cfg.User, cfg.Password)
+	if cfg.AuthMode == config.AuthModeExternal {
+		userInfo = url.User(cfg.User)
+	}
+
+	dsnURL := url.URL{
+		Scheme: cfg.Scheme,
+		User:   userInfo,
+		Host:   fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+	}
+
+	params := url.Values{}
+	params.Add("catalog", cfg.Catalog)
+	params.Add("schema", cfg.Schema)
+	params.Add("SSL", fmt.Sprintf("%t", cfg.SSL))
+	params.Add("SSLInsecure", fmt.Sprintf("%t", cfg.SSLInsecure))
+	params.Add("custom_client", "mcp-trino")
+
+	dsnURL.RawQuery = params.Encode()
+	return dsnURL.String()
 }
 
 // Close closes the database connection
