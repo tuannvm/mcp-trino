@@ -83,65 +83,112 @@ type contextKey string
 
 const (
 	impersonatedUserKey contextKey = "impersonated_user"
+
+	// maxAuthRetries caps how many token-refresh cycles the external auth flow attempts.
+	maxAuthRetries = 1
+	// maxChallengeRetries caps how many times resolveChallenge retries to obtain a fresh challenge.
+	maxChallengeRetries = 1
 )
 
-// headerRoundTripper adds X-Trino-Source and X-Trino-User headers to requests
+// headerRoundTripper adds Trino headers and handles external auth challenge/retry.
 type headerRoundTripper struct {
 	base         http.RoundTripper
 	config       *config.TrinoConfig
 	tokenManager bearerTokenManager
 }
 
+// RoundTrip dispatches to the appropriate auth flow.
 func (t *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	bodyBytes, err := readRequestBody(req)
+	if t.config.AuthMode == config.AuthModeExternalAuth {
+		return t.externalAuthRoundTrip(req)
+	}
+	return t.dispatchDecorated(req, nil, "")
+}
+
+// externalAuthRoundTrip attempts with a cached token; on 401 drives the Trino
+// browser challenge flow and retries up to maxAuthRetries times.
+func (t *headerRoundTripper) externalAuthRoundTrip(req *http.Request) (*http.Response, error) {
+	body, err := readRequestBody(req)
 	if err != nil {
 		return nil, err
 	}
 
-	token := ""
-	if t.tokenManager != nil {
-		token = t.tokenManager.CurrentToken()
-	}
-
-	resp, err := t.base.RoundTrip(t.cloneRequest(req, bodyBytes, token))
-	if err != nil || t.tokenManager == nil || resp.StatusCode != http.StatusUnauthorized {
-		return resp, err
-	}
-
-	challenge, challengeErr := parseBearerAuthChallenge(resp.Header)
-	if challengeErr != nil && token != "" {
-		_ = resp.Body.Close()
-		t.tokenManager.InvalidateToken()
-		resp, err = t.base.RoundTrip(t.cloneRequest(req, bodyBytes, ""))
-		if err != nil || resp.StatusCode != http.StatusUnauthorized {
+	token := t.tokenManager.CurrentToken()
+	for attempt := 0; ; attempt++ {
+		resp, err := t.dispatchDecorated(req, body, token)
+		if err != nil || resp.StatusCode != http.StatusUnauthorized || attempt >= maxAuthRetries {
+			// Invalidate a token the server just rejected so the next request
+			// doesn't reuse it.
+			if err == nil && resp.StatusCode == http.StatusUnauthorized && token != "" {
+				t.tokenManager.InvalidateToken()
+			}
 			return resp, err
 		}
-		challenge, challengeErr = parseBearerAuthChallenge(resp.Header)
-	}
-	if challengeErr != nil {
-		return resp, nil
-	}
 
-	_ = resp.Body.Close()
-	if token != "" {
-		t.tokenManager.InvalidateToken()
-	}
+		challenge, resp, err := t.resolveChallenge(req, body, token, resp)
+		if err != nil {
+			return nil, err
+		}
+		if challenge.TokenURL == "" {
+			return resp, nil
+		}
 
-	freshToken, err := t.tokenManager.AcquireToken(challenge, true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to complete Trino external authentication: %w", err)
+		_ = resp.Body.Close()
+		token, err = t.tokenManager.AcquireToken(req.Context(), challenge, token)
+		if err != nil {
+			return nil, fmt.Errorf("failed to complete Trino external authentication: %w", err)
+		}
 	}
-
-	return t.base.RoundTrip(t.cloneRequest(req, bodyBytes, freshToken))
 }
 
-func (t *headerRoundTripper) cloneRequest(req *http.Request, body []byte, token string) *http.Request {
+// resolveChallenge parses the Trino bearer challenge from a 401 response.
+// If the 401 had no challenge (stale token rejection), invalidates the token
+// and retries bare once so Trino issues a fresh challenge.
+func (t *headerRoundTripper) resolveChallenge(
+	req *http.Request,
+	body []byte,
+	sentToken string,
+	resp *http.Response,
+) (bearerAuthChallenge, *http.Response, error) {
+	for attempt := 0; attempt <= maxChallengeRetries; attempt++ {
+		challenge, err := parseBearerAuthChallenge(resp.Header)
+		if err == nil {
+			return challenge, resp, nil
+		}
+		if sentToken == "" || attempt == maxChallengeRetries {
+			// Close the body: callers must not receive a non-nil resp alongside
+			// a non-nil err (RoundTripper contract).
+			_ = resp.Body.Close()
+			return bearerAuthChallenge{}, nil, err
+		}
+
+		// Stale token rejected without a challenge — clear it and retry bare.
+		_ = resp.Body.Close()
+		t.tokenManager.InvalidateToken()
+		sentToken = ""
+
+		resp, err = t.dispatchDecorated(req, body, "")
+		if err != nil || resp.StatusCode != http.StatusUnauthorized {
+			return bearerAuthChallenge{}, resp, err
+		}
+	}
+
+	return bearerAuthChallenge{}, nil, fmt.Errorf("internal: resolveChallenge loop exited unexpectedly")
+}
+
+// dispatchDecorated decorates the request and sends it through the base transport.
+// Pass nil body to preserve the original; pass buffered bytes on retry paths.
+func (t *headerRoundTripper) dispatchDecorated(req *http.Request, body []byte, bearerToken string) (*http.Response, error) {
+	return t.base.RoundTrip(t.decorateRequest(req, body, bearerToken))
+}
+
+// decorateRequest clones req, optionally overrides the body, and injects Trino headers.
+func (t *headerRoundTripper) decorateRequest(req *http.Request, body []byte, token string) *http.Request {
 	cloned := req.Clone(req.Context())
+
 	if body != nil {
 		cloned.Body = io.NopCloser(bytes.NewReader(body))
 		cloned.ContentLength = int64(len(body))
-	} else {
-		cloned.Body = nil
 	}
 
 	if token != "" {

@@ -58,7 +58,7 @@ func TestExternalAuthTokenManagerWaitForToken(t *testing.T) {
 		pollTimeout:  time.Second,
 	}
 
-	token, err := manager.waitForToken(server.URL)
+	token, err := manager.waitForToken(t.Context(), server.URL)
 	if err != nil {
 		t.Fatalf("waitForToken() error = %v", err)
 	}
