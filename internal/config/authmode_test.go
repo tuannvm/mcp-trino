@@ -7,8 +7,10 @@ import (
 
 func TestTrinoAuthModeConfiguration(t *testing.T) {
 	origAuthMode := os.Getenv("TRINO_AUTH_MODE")
+	origScheme := os.Getenv("TRINO_SCHEME")
 	defer func() {
 		_ = os.Setenv("TRINO_AUTH_MODE", origAuthMode)
+		_ = os.Setenv("TRINO_SCHEME", origScheme)
 	}()
 
 	tests := []struct {
@@ -40,7 +42,7 @@ func TestTrinoAuthModeConfiguration(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			expected := tt.authMode
+			expected := AuthMode(tt.authMode)
 			if expected == "" {
 				expected = AuthModeBasic
 			}
@@ -48,5 +50,21 @@ func TestTrinoAuthModeConfiguration(t *testing.T) {
 				t.Fatalf("AuthMode = %q, want %q", cfg.AuthMode, expected)
 			}
 		})
+	}
+}
+
+func TestTrinoAuthModeExternalRequiresHTTPS(t *testing.T) {
+	origAuthMode := os.Getenv("TRINO_AUTH_MODE")
+	origScheme := os.Getenv("TRINO_SCHEME")
+	defer func() {
+		_ = os.Setenv("TRINO_AUTH_MODE", origAuthMode)
+		_ = os.Setenv("TRINO_SCHEME", origScheme)
+	}()
+
+	_ = os.Setenv("TRINO_AUTH_MODE", AuthModeExternalAuth.String())
+	_ = os.Setenv("TRINO_SCHEME", "http")
+
+	if _, err := NewTrinoConfig(); err == nil {
+		t.Fatal("expected error when external auth is configured over http")
 	}
 }

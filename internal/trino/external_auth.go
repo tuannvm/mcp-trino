@@ -26,7 +26,7 @@ var (
 
 type bearerTokenManager interface {
 	CurrentToken() string
-	AcquireToken(challenge bearerAuthChallenge) (string, error)
+	AcquireToken(challenge bearerAuthChallenge, forceRefresh bool) (string, error)
 	InvalidateToken()
 }
 
@@ -44,6 +44,14 @@ type externalAuthTokenManager struct {
 
 	mu    sync.Mutex
 	token string
+
+	inFlight *tokenAcquisition
+}
+
+type tokenAcquisition struct {
+	done  chan struct{}
+	token string
+	err   error
 }
 
 type externalTokenCache struct {
@@ -57,7 +65,7 @@ type externalTokenPollResponse struct {
 }
 
 func createBearerTokenManager(cfg *config.TrinoConfig) bearerTokenManager {
-	if cfg.AuthMode != config.AuthModeExternal {
+	if cfg.AuthMode != config.AuthModeExternalAuth {
 		return nil
 	}
 
@@ -99,38 +107,59 @@ func (m *externalAuthTokenManager) CurrentToken() string {
 	return m.token
 }
 
-func (m *externalAuthTokenManager) AcquireToken(challenge bearerAuthChallenge) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *externalAuthTokenManager) AcquireToken(challenge bearerAuthChallenge, forceRefresh bool) (string, error) {
+	for {
+		m.mu.Lock()
+		if !forceRefresh {
+			if m.token != "" {
+				token := m.token
+				m.mu.Unlock()
+				return token, nil
+			}
 
-	if m.token != "" {
-		return m.token, nil
+			if cache := m.loadCache(); cache != nil && cache.AccessToken != "" {
+				m.token = cache.AccessToken
+				token := m.token
+				m.mu.Unlock()
+				return token, nil
+			}
+		}
+
+		if m.inFlight != nil {
+			inFlight := m.inFlight
+			m.mu.Unlock()
+			<-inFlight.done
+			if inFlight.err != nil {
+				return "", inFlight.err
+			}
+			return inFlight.token, nil
+		}
+
+		if challenge.TokenURL == "" {
+			m.mu.Unlock()
+			return "", fmt.Errorf("missing Trino external auth token URL")
+		}
+
+		inFlight := &tokenAcquisition{done: make(chan struct{})}
+		m.inFlight = inFlight
+		m.mu.Unlock()
+
+		token, err := m.acquireFreshToken(challenge)
+
+		m.mu.Lock()
+		if err == nil {
+			m.token = token
+			m.saveCache(&externalTokenCache{AccessToken: token})
+		}
+		inFlight.token = token
+		inFlight.err = err
+		close(inFlight.done)
+		if m.inFlight == inFlight {
+			m.inFlight = nil
+		}
+		m.mu.Unlock()
+		return token, err
 	}
-
-	if cache := m.loadCache(); cache != nil && cache.AccessToken != "" {
-		m.token = cache.AccessToken
-		return m.token, nil
-	}
-
-	if challenge.RedirectURL == "" || challenge.TokenURL == "" {
-		return "", fmt.Errorf("missing Trino external auth challenge URLs")
-	}
-
-	fmt.Fprintln(os.Stderr, "\nOpening browser for Trino authentication...")
-	fmt.Fprintln(os.Stderr, challenge.RedirectURL)
-	fmt.Fprintln(os.Stderr)
-	if err := m.openBrowser(challenge.RedirectURL); err != nil {
-		log.Printf("WARNING: Could not open browser: %v", err)
-	}
-
-	token, err := m.waitForToken(challenge.TokenURL)
-	if err != nil {
-		return "", err
-	}
-
-	m.token = token
-	m.saveCache(&externalTokenCache{AccessToken: token})
-	return token, nil
 }
 
 func (m *externalAuthTokenManager) InvalidateToken() {
@@ -159,14 +188,17 @@ func parseBearerAuthChallenge(headers http.Header) (bearerAuthChallenge, error) 
 
 	redirectMatch := redirectServerPattern.FindStringSubmatch(joined)
 	tokenMatch := tokenServerPattern.FindStringSubmatch(joined)
-	if len(redirectMatch) < 2 || len(tokenMatch) < 2 {
+	if len(tokenMatch) < 2 {
 		return bearerAuthChallenge{}, fmt.Errorf("no Trino external auth challenge found in WWW-Authenticate header")
 	}
 
-	return bearerAuthChallenge{
-		RedirectURL: redirectMatch[1],
-		TokenURL:    tokenMatch[1],
-	}, nil
+	challenge := bearerAuthChallenge{
+		TokenURL: tokenMatch[1],
+	}
+	if len(redirectMatch) >= 2 {
+		challenge.RedirectURL = redirectMatch[1]
+	}
+	return challenge, nil
 }
 
 func (m *externalAuthTokenManager) waitForToken(initialTokenURL string) (string, error) {
@@ -225,6 +257,19 @@ func (m *externalAuthTokenManager) cleanupTokenURL(tokenURL string) {
 	if err == nil && resp != nil {
 		_ = resp.Body.Close()
 	}
+}
+
+func (m *externalAuthTokenManager) acquireFreshToken(challenge bearerAuthChallenge) (string, error) {
+	if challenge.RedirectURL != "" {
+		fmt.Fprintln(os.Stderr, "\nOpening browser for Trino authentication...")
+		fmt.Fprintln(os.Stderr, challenge.RedirectURL)
+		fmt.Fprintln(os.Stderr)
+		if err := m.openBrowser(challenge.RedirectURL); err != nil {
+			log.Printf("WARNING: Could not open browser: %v", err)
+		}
+	}
+
+	return m.waitForToken(challenge.TokenURL)
 }
 
 func (m *externalAuthTokenManager) loadCache() *externalTokenCache {

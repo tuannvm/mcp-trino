@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +71,7 @@ func TestExternalAuthTokenManagerWaitForToken(t *testing.T) {
 }
 
 func TestExternalAuthTokenManagerCache(t *testing.T) {
-	cachePath := t.TempDir() + `\external-cache.json`
+	cachePath := filepath.Join(t.TempDir(), "external-cache.json")
 	manager := &externalAuthTokenManager{cachePath: cachePath}
 	manager.saveCache(&externalTokenCache{AccessToken: "cached-token"})
 
@@ -86,6 +87,22 @@ func TestExternalAuthTokenManagerCache(t *testing.T) {
 	}
 	if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
 		t.Error("expected cache file to be removed")
+	}
+}
+
+func TestParseBearerAuthChallenge_TokenOnly(t *testing.T) {
+	headers := http.Header{}
+	headers.Add("WWW-Authenticate", `Bearer x_token_server="https://trino.example.com/token/456"`)
+
+	challenge, err := parseBearerAuthChallenge(headers)
+	if err != nil {
+		t.Fatalf("parseBearerAuthChallenge() error = %v", err)
+	}
+	if challenge.RedirectURL != "" {
+		t.Errorf("RedirectURL = %q, want empty", challenge.RedirectURL)
+	}
+	if challenge.TokenURL != "https://trino.example.com/token/456" {
+		t.Errorf("TokenURL = %q", challenge.TokenURL)
 	}
 }
 
@@ -106,7 +123,7 @@ func TestHeaderRoundTripperExternalAuthChallenge(t *testing.T) {
 	requestCount := 0
 	transport := &headerRoundTripper{
 		config: &config.TrinoConfig{
-			AuthMode:    config.AuthModeExternal,
+			AuthMode:    config.AuthModeExternalAuth,
 			TrinoSource: "mcp-trino/test",
 		},
 		tokenManager: manager,
@@ -124,7 +141,7 @@ func TestHeaderRoundTripperExternalAuthChallenge(t *testing.T) {
 				return &http.Response{
 					StatusCode: http.StatusUnauthorized,
 					Header:     headers,
-					Body: io.NopCloser(strings.NewReader("unauthorized")),
+					Body:       io.NopCloser(strings.NewReader("unauthorized")),
 				}, nil
 			}
 
@@ -169,7 +186,7 @@ func TestBuildDSNExternalModeOmitsPassword(t *testing.T) {
 		Schema:      "default",
 		SSL:         true,
 		SSLInsecure: true,
-		AuthMode:    config.AuthModeExternal,
+		AuthMode:    config.AuthModeExternalAuth,
 	})
 
 	if strings.Contains(dsn, "secret") {

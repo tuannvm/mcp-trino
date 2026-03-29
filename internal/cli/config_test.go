@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	cfgpkg "github.com/tuannvm/mcp-trino/internal/config"
 )
 
 func TestDefaultCLIConfig(t *testing.T) {
@@ -233,7 +235,7 @@ func TestApplyToEnv_AuthMode(t *testing.T) {
 		Profiles: map[string]TrinoProfileConfig{
 			"test-profile": {
 				Host:     "testhost",
-				AuthMode: "external",
+				AuthMode: cfgpkg.AuthModeExternalAuth,
 			},
 		},
 	}
@@ -243,18 +245,22 @@ func TestApplyToEnv_AuthMode(t *testing.T) {
 	if got := os.Getenv("TRINO_AUTH_MODE"); got != "external" {
 		t.Fatalf("expected TRINO_AUTH_MODE='external', got %q", got)
 	}
+
+	cfg.Profiles["test-profile"] = TrinoProfileConfig{
+		Host: "testhost",
+	}
+	_ = cfg.ApplyToEnv("test-profile")
+
+	if got := os.Getenv("TRINO_AUTH_MODE"); got != "" {
+		t.Fatalf("expected TRINO_AUTH_MODE to be unset, got %q", got)
+	}
 }
 
 func TestLoadCLIConfig_MissingFile(t *testing.T) {
 	// Use a temp directory to ensure config doesn't exist
 	tmpDir := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", originalHome)
-	})
-
-	// Set HOME to temp dir (where no .config/trino/config.yaml exists)
-	_ = os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	cfg, err := LoadCLIConfig()
 	if err != nil {
@@ -269,11 +275,8 @@ func TestLoadCLIConfig_MissingFile(t *testing.T) {
 
 func TestSaveCLIConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", originalHome)
-	})
-	_ = os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	cfg := &CLIConfig{
 		Current: "default",
@@ -501,11 +504,8 @@ func TestGetProfileNames(t *testing.T) {
 
 func TestSetCurrent(t *testing.T) {
 	tmpDir := t.TempDir()
-	originalHome := os.Getenv("HOME")
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", originalHome)
-	})
-	_ = os.Setenv("HOME", tmpDir)
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("USERPROFILE", tmpDir)
 
 	cfg := &CLIConfig{
 		Current: "default",

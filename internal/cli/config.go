@@ -5,19 +5,20 @@ import (
 	"os"
 	"path/filepath"
 
+	cfgpkg "github.com/tuannvm/mcp-trino/internal/config"
 	"gopkg.in/yaml.v3"
 )
 
 // TrinoProfileConfig represents a single Trino connection profile
 type TrinoProfileConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-	AuthMode string `yaml:"auth_mode,omitempty"`
-	Catalog  string `yaml:"catalog"`
-	Schema   string `yaml:"schema"`
-	Source   string `yaml:"source"`
+	Host     string          `yaml:"host"`
+	Port     int             `yaml:"port"`
+	User     string          `yaml:"user"`
+	Password string          `yaml:"password"`
+	AuthMode cfgpkg.AuthMode `yaml:"auth_mode,omitempty"`
+	Catalog  string          `yaml:"catalog"`
+	Schema   string          `yaml:"schema"`
+	Source   string          `yaml:"source"`
 	SSL      struct {
 		Enabled  *bool `yaml:"enabled"` // pointer to distinguish unset vs false
 		Insecure bool  `yaml:"insecure"`
@@ -29,7 +30,7 @@ type CLIConfig struct {
 	// ConfigPath tracks where this config was loaded from (not saved to YAML)
 	ConfigPath string `yaml:"-"`
 
-	Current  string                       `yaml:"current"` // default profile name
+	Current  string                        `yaml:"current"` // default profile name
 	Profiles map[string]TrinoProfileConfig `yaml:"profiles"`
 	Output   struct {
 		Format string `yaml:"format"` // table, json, csv
@@ -351,7 +352,9 @@ func (c *CLIConfig) ApplyToEnv(profileName string) error {
 	setEnvIfValue("TRINO_USER", profile.User)
 	setEnvIfValue("TRINO_PASSWORD", profile.Password)
 	if profile.AuthMode != "" {
-		setEnvIfValue("TRINO_AUTH_MODE", profile.AuthMode)
+		setEnvIfValue("TRINO_AUTH_MODE", profile.AuthMode.String())
+	} else {
+		_ = os.Unsetenv("TRINO_AUTH_MODE")
 	}
 	setEnvIfValue("TRINO_CATALOG", profile.Catalog)
 	setEnvIfValue("TRINO_SCHEMA", profile.Schema)

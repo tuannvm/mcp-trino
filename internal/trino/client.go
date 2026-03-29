@@ -45,7 +45,7 @@ var (
 	}
 
 	// Pre-compiled write operation patterns
-	writeOpPatterns     []*regexp.Regexp
+	writeOpPatterns      []*regexp.Regexp
 	writeOpsExceptCreate []*regexp.Regexp
 
 	// Pre-compiled sanitization patterns
@@ -123,8 +123,11 @@ func (t *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	}
 
 	_ = resp.Body.Close()
+	if token != "" {
+		t.tokenManager.InvalidateToken()
+	}
 
-	freshToken, err := t.tokenManager.AcquireToken(challenge)
+	freshToken, err := t.tokenManager.AcquireToken(challenge, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to complete Trino external authentication: %w", err)
 	}
@@ -230,7 +233,7 @@ func NewClient(cfg *config.TrinoConfig) (*Client, error) {
 
 func buildDSN(cfg *config.TrinoConfig) string {
 	userInfo := url.UserPassword(cfg.User, cfg.Password)
-	if cfg.AuthMode == config.AuthModeExternal {
+	if cfg.AuthMode == config.AuthModeExternalAuth {
 		userInfo = url.User(cfg.User)
 	}
 
