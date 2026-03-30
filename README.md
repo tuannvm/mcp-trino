@@ -20,6 +20,10 @@ This project implements a Model Context Protocol (MCP) server for Trino in Go. I
 
 Trino (formerly PrestoSQL) is a powerful distributed SQL query engine designed for fast analytics on large datasets.
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/tuannvm-mcp-trino).
+
 ## Architecture
 
 ```mermaid
