@@ -14,7 +14,7 @@ import (
 // VaultProvider reads secrets from a Vault KV path.
 type VaultProvider struct {
 	addr   string
-	token  string
+	token  []byte
 	path   string
 	client *http.Client
 }
@@ -36,7 +36,7 @@ func NewVaultProvider(u *url.URL) (*VaultProvider, error) {
 
 	return &VaultProvider{
 		addr:   strings.TrimRight(addr, "/"),
-		token:  token,
+		token:  []byte(token),
 		path:   path,
 		client: &http.Client{},
 	}, nil
@@ -51,7 +51,7 @@ func (p *VaultProvider) Load(ctx context.Context) (map[string][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create vault request: %w", err)
 	}
-	req.Header.Set("X-Vault-Token", p.token)
+	req.Header.Set("X-Vault-Token", string(p.token))
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -98,9 +98,9 @@ func (p *VaultProvider) Load(ctx context.Context) (map[string][]byte, error) {
 }
 
 func (p *VaultProvider) Close() error {
-	if p.token != "" {
-		zeroBytes([]byte(p.token))
-		p.token = ""
+	if len(p.token) > 0 {
+		zeroBytes(p.token)
+		p.token = nil
 	}
 	return nil
 }
