@@ -61,7 +61,11 @@ func NewTrinoConfig() (*TrinoConfig, error) {
 
 // NewTrinoConfigWithVersion creates a new TrinoConfig with a specific version for X-Trino-Source
 func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
-	ctx := context.Background()
+	// Use a timeout for secret retrieval to prevent startup hangs
+	const secretLoadTimeout = 30 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), secretLoadTimeout)
+	defer cancel()
+
 	resolver, err := secret.NewResolverFromEnv()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize secret resolver: %w", err)

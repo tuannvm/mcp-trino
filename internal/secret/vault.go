@@ -70,7 +70,7 @@ func (p *VaultProvider) Load(ctx context.Context) (map[string][]byte, error) {
 	}
 
 	var parsed struct {
-		Data map[string]interface{} `json:"data"`
+		Data map[string]any `json:"data"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil, fmt.Errorf("invalid vault response: %w", err)
@@ -98,5 +98,9 @@ func (p *VaultProvider) Load(ctx context.Context) (map[string][]byte, error) {
 }
 
 func (p *VaultProvider) Close() error {
+	if p.token != "" {
+		zeroBytes([]byte(p.token))
+		p.token = ""
+	}
 	return nil
 }

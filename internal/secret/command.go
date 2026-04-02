@@ -44,7 +44,7 @@ func (p *CommandProvider) Load(ctx context.Context) (map[string][]byte, error) {
 	}
 	defer zeroBytes(output)
 
-	parsed := map[string]interface{}{}
+	parsed := map[string]any{}
 	if err := json.Unmarshal(output, &parsed); err != nil {
 		return nil, fmt.Errorf("secret command returned invalid JSON object: %w", err)
 	}
