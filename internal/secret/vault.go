@@ -14,7 +14,6 @@ import (
 // VaultProvider reads secrets from a Vault KV path.
 type VaultProvider struct {
 	addr   string
-	token  []byte
 	path   string
 	client *http.Client
 }
@@ -33,10 +32,10 @@ func NewVaultProvider(u *url.URL) (*VaultProvider, error) {
 	if token == "" {
 		return nil, fmt.Errorf("VAULT_TOKEN is required for vault secret source")
 	}
+	_ = token // Used for validation only
 
 	return &VaultProvider{
 		addr:   strings.TrimRight(addr, "/"),
-		token:  []byte(token),
 		path:   path,
 		client: &http.Client{},
 	}, nil
@@ -47,11 +46,16 @@ func (p *VaultProvider) Name() string {
 }
 
 func (p *VaultProvider) Load(ctx context.Context) (map[string][]byte, error) {
+	token := strings.TrimSpace(os.Getenv("VAULT_TOKEN"))
+	if token == "" {
+		return nil, fmt.Errorf("VAULT_TOKEN is required for vault secret source")
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.addr+"/v1/"+p.path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create vault request: %w", err)
 	}
-	req.Header.Set("X-Vault-Token", string(p.token))
+	req.Header.Set("X-Vault-Token", token)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -80,7 +84,7 @@ func (p *VaultProvider) Load(ctx context.Context) (map[string][]byte, error) {
 	}
 
 	payload := parsed.Data
-	if nested, ok := parsed.Data["data"].(map[string]interface{}); ok {
+	if nested, ok := parsed.Data["data"].(map[string]any); ok {
 		payload = nested
 	}
 
@@ -98,9 +102,5 @@ func (p *VaultProvider) Load(ctx context.Context) (map[string][]byte, error) {
 }
 
 func (p *VaultProvider) Close() error {
-	if len(p.token) > 0 {
-		zeroBytes(p.token)
-		p.token = nil
-	}
 	return nil
 }
