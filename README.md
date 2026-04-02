@@ -231,6 +231,17 @@ export TRINO_SCHEMA=analytics
 export TRINO_SSL=true
 ```
 
+**Secret Manager Source** (optional):
+
+```bash
+# Enable dynamic secret loading for config keys such as:
+# TRINO_USER, TRINO_PASSWORD, OIDC_CLIENT_SECRET, JWT_SECRET, etc.
+export TRINO_SECRET_SOURCE=vault://secret/data/mcp-trino
+
+# Optional: fail startup if secret retrieval fails
+export TRINO_SECRET_REQUIRED=true
+```
+
 **REPL Meta-Commands** (in interactive mode):
 - `\help` - Show help
 - `\quit`, `\exit`, `\q` - Exit REPL
@@ -252,6 +263,22 @@ For client integration and tool documentation, see [Integration Guide](docs/inte
 ## Configuration
 
 **Key Variables:** `TRINO_HOST`, `TRINO_USER`, `TRINO_SCHEME`, `MCP_TRANSPORT`, `OAUTH_PROVIDER`
+
+**Secret Sources:**
+
+```bash
+# HashiCorp Vault KV (requires VAULT_ADDR + VAULT_TOKEN)
+export VAULT_ADDR=https://vault.company.com
+export VAULT_TOKEN=...
+export TRINO_SECRET_SOURCE=vault://secret/data/mcp-trino
+
+# 1Password CLI (requires authenticated `op`)
+export TRINO_SECRET_SOURCE=op://Engineering/Trino
+
+# Generic command adapter (must print JSON object to stdout)
+export TRINO_SECRET_SOURCE=command://local
+export TRINO_SECRET_COMMAND='printf "%s" "{\"TRINO_PASSWORD\":\"secret\"}"'
+```
 
 **OAuth Configuration:**
 

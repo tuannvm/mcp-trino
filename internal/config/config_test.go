@@ -335,3 +335,55 @@ func TestNewTrinoConfigMalformedAllowlist(t *testing.T) {
 		})
 	}
 }
+
+func TestNewTrinoConfigLoadsSecretsFromCommandProvider(t *testing.T) {
+	t.Setenv("TRINO_SECRET_SOURCE", "command://local")
+	t.Setenv("TRINO_SECRET_COMMAND", `printf '%s' '{"TRINO_USER":"secret-user","TRINO_PASSWORD":"secret-pass"}'`)
+	t.Setenv("TRINO_USER", "env-user")
+	t.Setenv("TRINO_PASSWORD", "env-pass")
+	t.Setenv("OAUTH_ENABLED", "false")
+
+	cfg, err := NewTrinoConfig()
+	if err != nil {
+		t.Fatalf("NewTrinoConfig() error = %v", err)
+	}
+
+	if cfg.User != "secret-user" {
+		t.Fatalf("User = %q, want secret-user", cfg.User)
+	}
+	if cfg.Password != "secret-pass" {
+		t.Fatalf("Password = %q, want secret-pass", cfg.Password)
+	}
+}
+
+func TestNewTrinoConfigFallsBackWhenSecretSourceFails(t *testing.T) {
+	t.Setenv("TRINO_SECRET_SOURCE", "command://local")
+	t.Setenv("TRINO_SECRET_COMMAND", "false")
+	t.Setenv("TRINO_SECRET_REQUIRED", "false")
+	t.Setenv("TRINO_USER", "env-user")
+	t.Setenv("TRINO_PASSWORD", "env-pass")
+	t.Setenv("OAUTH_ENABLED", "false")
+
+	cfg, err := NewTrinoConfig()
+	if err != nil {
+		t.Fatalf("NewTrinoConfig() error = %v", err)
+	}
+
+	if cfg.User != "env-user" {
+		t.Fatalf("User = %q, want env-user", cfg.User)
+	}
+	if cfg.Password != "env-pass" {
+		t.Fatalf("Password = %q, want env-pass", cfg.Password)
+	}
+}
+
+func TestNewTrinoConfigFailsWhenRequiredSecretsFail(t *testing.T) {
+	t.Setenv("TRINO_SECRET_SOURCE", "command://local")
+	t.Setenv("TRINO_SECRET_COMMAND", "false")
+	t.Setenv("TRINO_SECRET_REQUIRED", "true")
+	t.Setenv("OAUTH_ENABLED", "false")
+
+	if _, err := NewTrinoConfig(); err == nil {
+		t.Fatalf("expected NewTrinoConfig() to fail when required secret source is unavailable")
+	}
+}

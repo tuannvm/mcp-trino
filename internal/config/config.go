@@ -1,12 +1,15 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tuannvm/mcp-trino/internal/secret"
 )
 
 // TrinoConfig holds Trino connection parameters
@@ -58,28 +61,59 @@ func NewTrinoConfig() (*TrinoConfig, error) {
 
 // NewTrinoConfigWithVersion creates a new TrinoConfig with a specific version for X-Trino-Source
 func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
-	port, _ := strconv.Atoi(getEnv("TRINO_PORT", "8080"))
-	ssl, _ := strconv.ParseBool(getEnv("TRINO_SSL", "true"))
-	sslInsecure, _ := strconv.ParseBool(getEnv("TRINO_SSL_INSECURE", "true"))
-	scheme := getEnv("TRINO_SCHEME", "https")
-	allowWriteQueries, _ := strconv.ParseBool(getEnv("TRINO_ALLOW_WRITE_QUERIES", "false"))
+	ctx := context.Background()
+	resolver, err := secret.NewResolverFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize secret resolver: %w", err)
+	}
+	if resolver != nil {
+		defer func() {
+			if closeErr := resolver.Close(); closeErr != nil {
+				log.Printf("WARNING: Failed to close secret resolver: %v", closeErr)
+			}
+		}()
+		if err := resolver.Preload(ctx); err != nil {
+			if resolver.Required() {
+				return nil, fmt.Errorf("failed to load required secrets from %s: %w", resolver.Source(), err)
+			}
+			log.Printf("WARNING: Failed to load optional secrets from %s (%v). Falling back to environment variables.", resolver.Source(), err)
+			resolver = nil
+		} else {
+			log.Printf("INFO: Loaded secret source via %s provider", resolver.ProviderName())
+		}
+	}
+
+	resolveEnv := func(key, fallback string) string {
+		if resolver != nil {
+			if value, ok, lookupErr := resolver.Lookup(ctx, key); lookupErr == nil && ok {
+				return value
+			}
+		}
+		return getEnv(key, fallback)
+	}
+
+	port, _ := strconv.Atoi(resolveEnv("TRINO_PORT", "8080"))
+	ssl, _ := strconv.ParseBool(resolveEnv("TRINO_SSL", "true"))
+	sslInsecure, _ := strconv.ParseBool(resolveEnv("TRINO_SSL_INSECURE", "true"))
+	scheme := resolveEnv("TRINO_SCHEME", "https")
+	allowWriteQueries, _ := strconv.ParseBool(resolveEnv("TRINO_ALLOW_WRITE_QUERIES", "false"))
 
 	// OAuth configuration - OAUTH_ENABLED is the single source of truth
-	oauthEnabled, _ := strconv.ParseBool(getEnv("OAUTH_ENABLED", "false"))
-	oauthMode := strings.ToLower(getEnv("OAUTH_MODE", "native"))
-	oauthProvider := strings.ToLower(getEnv("OAUTH_PROVIDER", "hmac"))
-	jwtSecret := getEnv("JWT_SECRET", "")
+	oauthEnabled, _ := strconv.ParseBool(resolveEnv("OAUTH_ENABLED", "false"))
+	oauthMode := strings.ToLower(resolveEnv("OAUTH_MODE", "native"))
+	oauthProvider := strings.ToLower(resolveEnv("OAUTH_PROVIDER", "hmac"))
+	jwtSecret := resolveEnv("JWT_SECRET", "")
 
 	// OIDC configuration with secure defaults
-	oidcIssuer := getEnv("OIDC_ISSUER", "")
-	oidcAudience := getEnv("OIDC_AUDIENCE", "") // No default - must be explicitly configured
-	oidcClientID := getEnv("OIDC_CLIENT_ID", "")
-	oidcClientSecret := getEnv("OIDC_CLIENT_SECRET", "")
+	oidcIssuer := resolveEnv("OIDC_ISSUER", "")
+	oidcAudience := resolveEnv("OIDC_AUDIENCE", "") // No default - must be explicitly configured
+	oidcClientID := resolveEnv("OIDC_CLIENT_ID", "")
+	oidcClientSecret := resolveEnv("OIDC_CLIENT_SECRET", "")
 
 	// Redirect URI configuration with backward compatibility
-	oauthRedirectURIs := getEnv("OAUTH_ALLOWED_REDIRECT_URIS", "")
+	oauthRedirectURIs := resolveEnv("OAUTH_ALLOWED_REDIRECT_URIS", "")
 	if oauthRedirectURIs == "" {
-		deprecatedURI := getEnv("OAUTH_REDIRECT_URI", "")
+		deprecatedURI := resolveEnv("OAUTH_REDIRECT_URI", "")
 		if deprecatedURI != "" {
 			log.Println("WARNING: OAUTH_REDIRECT_URI is deprecated. Use OAUTH_ALLOWED_REDIRECT_URIS instead.")
 			oauthRedirectURIs = deprecatedURI
@@ -88,7 +122,7 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 
 	// Parse max rows from environment variable
 	const defaultMaxRows = 10000
-	maxRowsStr := getEnv("TRINO_MAX_ROWS", strconv.Itoa(defaultMaxRows))
+	maxRowsStr := resolveEnv("TRINO_MAX_ROWS", strconv.Itoa(defaultMaxRows))
 	maxRows, err := strconv.Atoi(maxRowsStr)
 	switch {
 	case err != nil:
@@ -101,7 +135,7 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 
 	// Parse query timeout from environment variable
 	const defaultTimeout = 300
-	timeoutStr := getEnv("TRINO_QUERY_TIMEOUT", strconv.Itoa(defaultTimeout))
+	timeoutStr := resolveEnv("TRINO_QUERY_TIMEOUT", strconv.Itoa(defaultTimeout))
 	timeoutInt, err := strconv.Atoi(timeoutStr)
 
 	// Validate timeout value
@@ -117,16 +151,16 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 	queryTimeout := time.Duration(timeoutInt) * time.Second
 
 	// Parse allowlist configuration
-	allowedCatalogs := parseAllowlist(getEnv("TRINO_ALLOWED_CATALOGS", ""))
-	allowedSchemas := parseAllowlist(getEnv("TRINO_ALLOWED_SCHEMAS", ""))
-	allowedTables := parseAllowlist(getEnv("TRINO_ALLOWED_TABLES", ""))
+	allowedCatalogs := parseAllowlist(resolveEnv("TRINO_ALLOWED_CATALOGS", ""))
+	allowedSchemas := parseAllowlist(resolveEnv("TRINO_ALLOWED_SCHEMAS", ""))
+	allowedTables := parseAllowlist(resolveEnv("TRINO_ALLOWED_TABLES", ""))
 
 	// Parse impersonation configuration
-	enableImpersonation, _ := strconv.ParseBool(getEnv("TRINO_ENABLE_IMPERSONATION", "false"))
-	impersonationField := strings.ToLower(getEnv("TRINO_IMPERSONATION_FIELD", "username"))
+	enableImpersonation, _ := strconv.ParseBool(resolveEnv("TRINO_ENABLE_IMPERSONATION", "false"))
+	impersonationField := strings.ToLower(resolveEnv("TRINO_IMPERSONATION_FIELD", "username"))
 
 	// Parse Trino source configuration with default
-	trinoSource := getEnv("TRINO_SOURCE", fmt.Sprintf("mcp-trino/%s", version))
+	trinoSource := resolveEnv("TRINO_SOURCE", fmt.Sprintf("mcp-trino/%s", version))
 	if trinoSource == "" {
 		// If explicitly set to empty, use default
 		trinoSource = fmt.Sprintf("mcp-trino/%s", version)
@@ -199,12 +233,12 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 	log.Printf("INFO: Trino query source attribution: %s", trinoSource)
 
 	return &TrinoConfig{
-		Host:                getEnv("TRINO_HOST", "localhost"),
+		Host:                resolveEnv("TRINO_HOST", "localhost"),
 		Port:                port,
-		User:                getEnv("TRINO_USER", "trino"),
-		Password:            getEnv("TRINO_PASSWORD", ""),
-		Catalog:             getEnv("TRINO_CATALOG", "memory"),
-		Schema:              getEnv("TRINO_SCHEMA", "default"),
+		User:                resolveEnv("TRINO_USER", "trino"),
+		Password:            resolveEnv("TRINO_PASSWORD", ""),
+		Catalog:             resolveEnv("TRINO_CATALOG", "memory"),
+		Schema:              resolveEnv("TRINO_SCHEMA", "default"),
 		Scheme:              scheme,
 		SSL:                 ssl,
 		SSLInsecure:         sslInsecure,
