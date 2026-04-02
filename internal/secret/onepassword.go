@@ -65,7 +65,7 @@ func (p *OnePasswordProvider) Load(ctx context.Context) (map[string][]byte, erro
 
 	output, err := p.runner(ctx, "op", args...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch secret from 1Password CLI")
+		return nil, fmt.Errorf("failed to fetch secret from 1Password CLI: %w", err)
 	}
 	defer zeroBytes(output)
 
@@ -89,8 +89,9 @@ func (p *OnePasswordProvider) Load(ctx context.Context) (map[string][]byte, erro
 		if field.Label != "" {
 			out[field.Label] = value
 		}
-		if field.ID != "" {
-			out[field.ID] = cloneBytes(value)
+		if field.ID != "" && field.ID != field.Label {
+			// Only clone if ID is different from Label to avoid duplicate entries
+			out[field.ID] = value
 		}
 	}
 	if len(out) == 0 {

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 // VaultProvider reads secrets from a Vault KV path.
@@ -37,7 +38,9 @@ func NewVaultProvider(u *url.URL) (*VaultProvider, error) {
 	return &VaultProvider{
 		addr:   strings.TrimRight(addr, "/"),
 		path:   path,
-		client: &http.Client{},
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}, nil
 }
 

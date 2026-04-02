@@ -43,4 +43,7 @@ func TestResolverLookupAndClose(t *testing.T) {
 	if got := string(resolver.secrets["TRINO_PASSWORD"]); got != "" {
 		t.Fatalf("secret bytes were not cleared")
 	}
+	if provider.loadCnt != 1 {
+		t.Fatalf("loadCnt = %d, want 1 (lazy loading)", provider.loadCnt)
+	}
 }

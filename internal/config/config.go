@@ -96,7 +96,10 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 
 	resolveEnv := func(key, fallback string) string {
 		if resolver != nil {
-			if value, ok, lookupErr := resolver.Lookup(ctx, key); lookupErr == nil && ok {
+			value, ok, lookupErr := resolver.Lookup(ctx, key)
+			if lookupErr != nil {
+				log.Printf("WARNING: Failed to lookup %s from secret source: %v", key, lookupErr)
+			} else if ok {
 				return value
 			}
 		}

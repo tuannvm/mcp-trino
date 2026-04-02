@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 const commandEnv = "TRINO_SECRET_COMMAND"
@@ -67,6 +68,12 @@ func (p *CommandProvider) Close() error {
 }
 
 func defaultShellRunner(ctx context.Context, cmdStr string) ([]byte, error) {
+	// Ensure a reasonable timeout if none is set
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
 	cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr)
 	return cmd.Output()
 }
