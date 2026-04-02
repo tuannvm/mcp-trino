@@ -68,7 +68,14 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 
 	resolver, err := secret.NewResolverFromEnv()
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize secret resolver: %w", err)
+		// Check if this is an optional secret source
+		required := strings.EqualFold(strings.TrimSpace(os.Getenv("TRINO_SECRET_REQUIRED")), "true")
+		if !required {
+			log.Printf("WARNING: Failed to initialize secret resolver (%v). Falling back to environment variables.", err)
+			resolver = nil
+		} else {
+			return nil, fmt.Errorf("failed to initialize required secret resolver: %w", err)
+		}
 	}
 	if resolver != nil {
 		defer func() {
