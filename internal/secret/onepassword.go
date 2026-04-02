@@ -5,21 +5,50 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 )
 
 // OnePasswordProvider loads secrets from an op:// item reference.
 type OnePasswordProvider struct {
-	reference string
-	runner    func(ctx context.Context, name string, args ...string) ([]byte, error)
+	vault  string
+	item   string
+	runner func(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
 func NewOnePasswordProvider(reference string) (*OnePasswordProvider, error) {
 	if reference == "" {
 		return nil, fmt.Errorf("1Password source cannot be empty")
 	}
+
+	// Parse op://vault/item or op://item format
+	// Remove the op:// prefix if present
+	ref := strings.TrimPrefix(reference, "op://")
+	if ref == reference {
+		// No op:// prefix, use as-is
+		return &OnePasswordProvider{
+			item:   ref,
+			runner: defaultCommandRunner,
+		}, nil
+	}
+
+	// Split by / to separate vault and item
+	parts := strings.SplitN(ref, "/", 2)
+	var vault, item string
+	if len(parts) == 2 {
+		vault = parts[0]
+		item = parts[1]
+	} else {
+		item = parts[0]
+	}
+
+	if item == "" {
+		return nil, fmt.Errorf("1Password item name cannot be empty")
+	}
+
 	return &OnePasswordProvider{
-		reference: reference,
-		runner:    defaultCommandRunner,
+		vault:  vault,
+		item:   item,
+		runner: defaultCommandRunner,
 	}, nil
 }
 
@@ -28,7 +57,12 @@ func (p *OnePasswordProvider) Name() string {
 }
 
 func (p *OnePasswordProvider) Load(ctx context.Context) (map[string][]byte, error) {
-	output, err := p.runner(ctx, "op", "item", "get", p.reference, "--format", "json")
+	args := []string{"item", "get", p.item, "--format", "json"}
+	if p.vault != "" {
+		args = append([]string{"--vault", p.vault}, args...)
+	}
+
+	output, err := p.runner(ctx, "op", args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch secret from 1Password CLI")
 	}
