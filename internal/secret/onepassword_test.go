@@ -82,7 +82,7 @@ func TestOnePasswordProviderCommandArguments(t *testing.T) {
 			return []byte(`{}`), nil
 		}
 		_, _ = provider.Load(context.Background())
-		wantArgs := []string{"--vault", "Engineering", "item", "get", "Trino", "--format", "json"}
+		wantArgs := []string{"item", "get", "--vault", "Engineering", "Trino", "--format", "json"}
 		if len(gotArgs) != len(wantArgs) {
 			t.Fatalf("got %d args, want %d", len(gotArgs), len(wantArgs))
 		}

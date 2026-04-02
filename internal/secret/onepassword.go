@@ -57,10 +57,11 @@ func (p *OnePasswordProvider) Name() string {
 }
 
 func (p *OnePasswordProvider) Load(ctx context.Context) (map[string][]byte, error) {
-	args := []string{"item", "get", p.item, "--format", "json"}
+	args := []string{"item", "get"}
 	if p.vault != "" {
-		args = append([]string{"--vault", p.vault}, args...)
+		args = append(args, "--vault", p.vault)
 	}
+	args = append(args, p.item, "--format", "json")
 
 	output, err := p.runner(ctx, "op", args...)
 	if err != nil {
