@@ -1,0 +1,1 @@
+I want you to understand the current project. I want you to make sure the features (ahead commit) of vungle/mcp-trino are safely merged into this repo. Use harness to achieve that. All the work should be commited to a feature branch

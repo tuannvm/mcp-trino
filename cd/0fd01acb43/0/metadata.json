@@ -1,0 +1,35 @@
+{
+  "cli_version": "0.5.3",
+  "checkpoint_id": "cd0fd01acb43",
+  "session_id": "0b02bd17-0082-41fb-9178-ce35392a8287",
+  "strategy": "manual-commit",
+  "created_at": "2026-04-11T08:56:20.915446Z",
+  "branch": "feat/merge-vungle-changes",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "internal/trino/client.go",
+    "internal/trino/client_test.go"
+  ],
+  "agent": "Claude Code",
+  "model": "GLM-5-Turbo",
+  "turn_id": "41d051efd46c",
+  "token_usage": {
+    "input_tokens": 131927,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 12098435,
+    "output_tokens": 26723,
+    "api_call_count": 118
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-04-11T08:56:20.569305Z",
+    "agent_lines": 56,
+    "agent_removed": 47,
+    "human_added": 1,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 57,
+    "total_lines_changed": 104,
+    "agent_percentage": 99.03846153846155,
+    "metric_version": 2
+  }
+}
