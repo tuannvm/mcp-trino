@@ -594,41 +594,41 @@ func TestMaxRowsConfigPropagation(t *testing.T) {
 	}
 }
 
-func TestGetQueryUsername(t *testing.T) {
+func TestGetOAuthUserAndUsername(t *testing.T) {
 	tests := []struct {
-		name     string
-		user     *oauth.User
-		expected string
+		name         string
+		user         *oauth.User
+		expectedName string
 	}{
 		{
-			name:     "User with email",
-			user:     &oauth.User{Email: "abc@example.com"},
-			expected: "abc@example.com",
+			name:         "User with email",
+			user:         &oauth.User{Email: "abc@example.com"},
+			expectedName: "abc@example.com",
 		},
 		{
-			name:     "User with username",
-			user:     &oauth.User{Username: "abc@example.com"},
-			expected: "abc@example.com",
+			name:         "User with username",
+			user:         &oauth.User{Username: "abc@example.com"},
+			expectedName: "abc@example.com",
 		},
 		{
-			name:     "User with username and email",
-			user:     &oauth.User{Username: "abc@example.com", Email: "def@example.com"},
-			expected: "abc@example.com",
+			name:         "User with username and email",
+			user:         &oauth.User{Username: "abc@example.com", Email: "def@example.com"},
+			expectedName: "abc@example.com",
 		},
 		{
-			name:     "User with subject",
-			user:     &oauth.User{Subject: "abc@example.com"},
-			expected: "abc@example.com",
+			name:         "User with subject",
+			user:         &oauth.User{Subject: "abc@example.com"},
+			expectedName: "abc@example.com",
 		},
 		{
-			name:     "Empty User - returns empty (no attribution)",
-			user:     &oauth.User{},
-			expected: "",
+			name:         "Empty User - returns mcp-trino-user (default attribution)",
+			user:         &oauth.User{},
+			expectedName: defaultAttributionUser,
 		},
 		{
-			name:     "Nil User - returns empty (no attribution)",
-			user:     nil,
-			expected: "",
+			name:         "Nil User - returns mcp-trino-user (default attribution)",
+			user:         nil,
+			expectedName: defaultAttributionUser,
 		},
 	}
 	for index := range tests {
@@ -638,9 +638,15 @@ func TestGetQueryUsername(t *testing.T) {
 			if tt.user != nil {
 				ctx = oauth.WithUser(ctx, tt.user)
 			}
-			result := getQueryUsername(ctx)
-			if result != tt.expected {
-				t.Errorf("getQueryUsername(%v) = %s, want %s", tt.user, result, tt.expected)
+			returnedUser, username := getOAuthUserAndUsername(ctx)
+			if username != tt.expectedName {
+				t.Errorf("getOAuthUserAndUsername(%v) username = %s, want %s", tt.user, username, tt.expectedName)
+			}
+			if tt.user == nil && returnedUser != nil {
+				t.Errorf("getOAuthUserAndUsername(%v) user = %v, want nil", tt.user, returnedUser)
+			}
+			if tt.user != nil && returnedUser == nil {
+				t.Errorf("getOAuthUserAndUsername(%v) user = nil, want non-nil", tt.user)
 			}
 		})
 	}

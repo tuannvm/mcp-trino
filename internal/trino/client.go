@@ -278,23 +278,28 @@ func sanitizeQueryForKeywordDetection(query string) string {
 	return strings.TrimSpace(query)
 }
 
-// getQueryUsername returns the username of the user executing the query if present in OAuth context
-// This is used for query attribution (X-Trino-Client-Tags/Info) independent of impersonation
-func getQueryUsername(ctx context.Context) string {
+// defaultAttributionUser is the fallback username used for query attribution
+// when no OAuth user identity is available.
+const defaultAttributionUser = "mcp-trino-user"
+
+// getOAuthUserAndUsername returns the OAuth user (if any) and the display username
+// from context. This avoids redundant context lookups.
+func getOAuthUserAndUsername(ctx context.Context) (*oauth.User, string) {
 	user, exists := oauth.GetUserFromContext(ctx)
 	if !exists || user == nil {
-		return ""
+		return nil, defaultAttributionUser
 	}
-	if user.Username != "" {
-		return user.Username
+	username := user.Username
+	if username == "" {
+		username = user.Email
 	}
-	if user.Email != "" {
-		return user.Email
+	if username == "" {
+		username = user.Subject
 	}
-	if user.Subject != "" {
-		return user.Subject
+	if username == "" {
+		username = defaultAttributionUser
 	}
-	return ""
+	return user, username
 }
 
 // QueryResult holds query results along with metadata about truncation.
@@ -331,18 +336,26 @@ func (c *Client) ExecuteQueryWithContext(ctx context.Context, query string) (*Qu
 	queryCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	// Build query arguments for attribution headers
-	// These are complementary to the X-Trino-User header set by RoundTripper
-	var queryArgs []interface{}
-	if userName := getQueryUsername(ctx); userName != "" {
-		queryArgs = append(queryArgs,
-			sql.Named("X-Trino-Client-Tags", userName),
-			sql.Named("X-Trino-Client-Info", userName),
-		)
-		// Only set X-Trino-Source if not already configured globally
-		if c.config.TrinoSource == "" {
-			queryArgs = append(queryArgs, sql.Named("X-Trino-Source", userName))
+	// Build query arguments for per-query user identity and attribution
+	// These are passed as NamedArgs to the Trino driver, which uses them to set
+	// session properties regardless of the authentication method.
+	_, userName := getOAuthUserAndUsername(ctx)
+	queryArgs := []interface{}{
+		sql.Named("X-Trino-Client-Tags", userName),
+		sql.Named("X-Trino-Client-Info", userName),
+	}
+	// When impersonation is enabled, use the impersonated user from context
+	// (set by prepareImpersonationContext which respects ImpersonationField config)
+	// for X-Trino-User instead of the raw OAuth username, ensuring the correct
+	// identity is forwarded to Trino.
+	if c.config.EnableImpersonation {
+		if impersonatedUser, ok := GetImpersonatedUser(ctx); ok && impersonatedUser != "" {
+			queryArgs = append(queryArgs, sql.Named("X-Trino-User", impersonatedUser))
 		}
+	}
+	// Only override X-Trino-Source via NamedArg if not already configured globally
+	if c.config.TrinoSource == "" {
+		queryArgs = append(queryArgs, sql.Named("X-Trino-Source", userName))
 	}
 
 	// Execute the query with optional attribution headers
