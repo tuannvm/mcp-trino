@@ -120,14 +120,6 @@ func runCLI(stdout, stderr io.Writer, rawArgs []string) error {
 		}
 		var parseErr error
 		cliConfig, parseErr = cli.ParseCLIConfigWithPath(data, *configFile)
-		if parseErr != nil && strings.HasSuffix(*configFile, ".yaml") {
-			// Legacy YAML config — parse and point ConfigPath at JSON for future saves
-			jsonPath := strings.TrimSuffix(*configFile, ".yaml") + ".json"
-			cliConfig, parseErr = cli.ParseYAMLConfigWithPath(data, jsonPath)
-			if parseErr == nil {
-				_ = cli.SaveCLIConfig(cliConfig)
-			}
-		}
 		if parseErr != nil {
 			return fmt.Errorf("failed to parse config file: %w", parseErr)
 		}
