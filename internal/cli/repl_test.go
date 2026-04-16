@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -193,6 +194,100 @@ func TestREPL_RunQuery(t *testing.T) {
 	output := stdout.String()
 	if !strings.Contains(output, "42") {
 		t.Errorf("expected query result in output, got: %s", output)
+	}
+}
+
+func TestREPL_QueryError_ToStderr(t *testing.T) {
+	client := &mockTrinoClient{
+		queryError: fmt.Errorf("connection refused"),
+	}
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, "table", &stdout, &stderr)
+
+	input := strings.NewReader("SELECT 1;\n\\quit\n")
+	repl := NewREPLWithReader(cmd, "", "", input)
+
+	err := repl.Run(context.Background())
+	if err != nil {
+		t.Fatalf("REPL.Run() failed: %v", err)
+	}
+
+	if !strings.Contains(stderr.String(), "connection refused") {
+		t.Errorf("expected error on stderr, got stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	// Error should NOT appear on stdout
+	if strings.Contains(stdout.String(), "connection refused") {
+		t.Error("error message should not appear on stdout")
+	}
+}
+
+func TestREPL_MetaCommandError_ToStderr(t *testing.T) {
+	client := &mockTrinoClient{}
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, "table", &stdout, &stderr)
+
+	input := strings.NewReader("\\describe\n\\quit\n")
+	repl := NewREPLWithReader(cmd, "", "", input)
+
+	err := repl.Run(context.Background())
+	if err != nil {
+		t.Fatalf("REPL.Run() failed: %v", err)
+	}
+
+	if !strings.Contains(stderr.String(), "usage:") {
+		t.Errorf("expected usage error on stderr, got stderr=%q", stderr.String())
+	}
+}
+
+func TestREPL_FormatCommand(t *testing.T) {
+	client := &mockTrinoClient{}
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, "table", &stdout, &stderr)
+
+	input := strings.NewReader("\\format json\n\\format\n\\quit\n")
+	repl := NewREPLWithReader(cmd, "", "", input)
+
+	err := repl.Run(context.Background())
+	if err != nil {
+		t.Fatalf("REPL.Run() failed: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Output format set to: json") {
+		t.Errorf("expected format change confirmation, got: %s", output)
+	}
+	if !strings.Contains(output, "Current format: json") {
+		t.Errorf("expected current format display, got: %s", output)
+	}
+}
+
+func TestREPL_InvalidFormatCommand(t *testing.T) {
+	client := &mockTrinoClient{}
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, "table", &stdout, &stderr)
+
+	input := strings.NewReader("\\format xml\n\\quit\n")
+	repl := NewREPLWithReader(cmd, "", "", input)
+
+	_ = repl.Run(context.Background())
+
+	if !strings.Contains(stderr.String(), "invalid format") {
+		t.Errorf("expected 'invalid format' on stderr, got: %s", stderr.String())
+	}
+}
+
+func TestREPL_EOF_GracefulExit(t *testing.T) {
+	client := &mockTrinoClient{}
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, "table", &stdout, &stderr)
+
+	// Empty input = immediate EOF
+	input := strings.NewReader("")
+	repl := NewREPLWithReader(cmd, "", "", input)
+
+	err := repl.Run(context.Background())
+	if err != nil {
+		t.Fatalf("REPL.Run() should exit gracefully on EOF, got: %v", err)
 	}
 }
 
