@@ -275,7 +275,7 @@ func (c *Commands) outputCSV(results interface{}) error {
 	}
 
 	if queryResults.Truncated {
-		_, _ = fmt.Fprintf(c.out, "# %d row(s) (truncated, max %d)\n", len(queryResults.Rows), queryResults.MaxRows)
+		_, _ = fmt.Fprintf(c.errOut, "# %d row(s) (truncated, max %d)\n", len(queryResults.Rows), queryResults.MaxRows)
 	}
 	return nil
 }

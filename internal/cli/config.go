@@ -91,7 +91,10 @@ func migrateYAMLConfig(yamlPath, jsonPath string) (*CLIConfig, error) {
 		return nil, fmt.Errorf("failed to read YAML config: %w", err)
 	}
 
-	cfg := parseSimpleYAML(data)
+	cfg, err := parseSimpleYAML(data)
+	if err != nil {
+		return nil, err
+	}
 	cfg.ConfigPath = jsonPath
 
 	// Ensure profiles exist
@@ -112,7 +115,7 @@ func migrateYAMLConfig(yamlPath, jsonPath string) (*CLIConfig, error) {
 
 // parseSimpleYAML does minimal YAML parsing for the known config structure
 // Handles the two known formats: flat (trino.host) and profiles-based
-func parseSimpleYAML(data []byte) *CLIConfig {
+func parseSimpleYAML(data []byte) (*CLIConfig, error) {
 	cfg := &CLIConfig{
 		Profiles: make(map[string]TrinoProfileConfig),
 	}
@@ -209,7 +212,12 @@ func parseSimpleYAML(data []byte) *CLIConfig {
 		}
 	}
 
-	return cfg
+	// Validate that we parsed something meaningful from non-empty input
+	if len(data) > 0 && len(cfg.Profiles) == 0 && cfg.Current == "" && cfg.Output.Format == "" {
+		return nil, fmt.Errorf("failed to parse YAML config: no valid configuration found")
+	}
+
+	return cfg, nil
 }
 
 // cleanYAMLValue strips YAML quoting and inline comments from a value
@@ -277,7 +285,10 @@ func ParseCLIConfigWithPath(data []byte, configPath string) (*CLIConfig, error) 
 
 // ParseYAMLConfigWithPath parses a legacy YAML config and sets the config path
 func ParseYAMLConfigWithPath(data []byte, configPath string) (*CLIConfig, error) {
-	cfg := parseSimpleYAML(data)
+	cfg, err := parseSimpleYAML(data)
+	if err != nil {
+		return nil, err
+	}
 	cfg.ConfigPath = configPath
 	if len(cfg.Profiles) == 0 {
 		cfg.Profiles = defaultCLIConfig().Profiles

@@ -54,6 +54,9 @@ func (r *REPL) Run(ctx context.Context) error {
 		_, _ = fmt.Fprint(r.out, r.prompt)
 
 		if !r.scanner.Scan() {
+			if err := r.scanner.Err(); err != nil {
+				return fmt.Errorf("input error: %w", err)
+			}
 			_, _ = fmt.Fprintln(r.out)
 			return nil
 		}

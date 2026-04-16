@@ -121,8 +121,12 @@ func runCLI(stdout, stderr io.Writer, rawArgs []string) error {
 		var parseErr error
 		cliConfig, parseErr = cli.ParseCLIConfigWithPath(data, *configFile)
 		if parseErr != nil && strings.HasSuffix(*configFile, ".yaml") {
-			// Retry as YAML for legacy config files
-			cliConfig, parseErr = cli.ParseYAMLConfigWithPath(data, *configFile)
+			// Legacy YAML config — parse and point ConfigPath at JSON for future saves
+			jsonPath := strings.TrimSuffix(*configFile, ".yaml") + ".json"
+			cliConfig, parseErr = cli.ParseYAMLConfigWithPath(data, jsonPath)
+			if parseErr == nil {
+				_ = cli.SaveCLIConfig(cliConfig)
+			}
 		}
 		if parseErr != nil {
 			return fmt.Errorf("failed to parse config file: %w", parseErr)
@@ -245,7 +249,7 @@ func runCLI(stdout, stderr io.Writer, rawArgs []string) error {
 			if !hasFlags(commandArgs) && len(commandArgs) > 0 {
 				return commands.Schemas(ctx, commandArgs[0])
 			}
-			return fmt.Errorf("schemas command error: %w", err)
+			return &usageError{err: fmt.Errorf("schemas command error: %w", err)}
 		}
 		if *schemasCatalog != "" {
 			return commands.Schemas(ctx, *schemasCatalog)
@@ -271,7 +275,7 @@ func runCLI(stdout, stderr io.Writer, rawArgs []string) error {
 				}
 				return commands.Tables(ctx, "", "")
 			}
-			return fmt.Errorf("tables command error: %w", err)
+			return &usageError{err: fmt.Errorf("tables command error: %w", err)}
 		}
 		remainingArgs := tablesFlagSet.Args()
 		finalCatalog, finalSchema := "", ""
@@ -609,7 +613,7 @@ func runConfigProfileCommand(w io.Writer, args []string, cliConfig *cli.CLIConfi
 		_, _ = fmt.Fprintln(w, "  mcp-trino config profile show <name>     Show profile details")
 		_, _ = fmt.Fprintln(w)
 		_, _ = fmt.Fprintf(w, "Current profile: %s\n", cliConfig.Current)
-		return nil
+		return &usageError{err: fmt.Errorf("config profile requires a subcommand: list, use, or show")}
 	}
 
 	switch args[2] {

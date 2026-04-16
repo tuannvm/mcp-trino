@@ -65,11 +65,7 @@ func main() {
 
 	if explicitCLI || shouldRunCLIMode(args) {
 		if err := RunCLIMode(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			if _, ok := err.(*usageError); ok {
-				os.Exit(exitUsage)
-			}
-			os.Exit(exitError)
+			exitCLIError(err)
 		}
 		return
 	}
@@ -84,13 +80,8 @@ func main() {
 		}
 
 		if isTTY() {
-			// Interactive terminal - show CLI help
 			if err := RunCLIMode(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				if _, ok := err.(*usageError); ok {
-					os.Exit(exitUsage)
-				}
-				os.Exit(exitError)
+				exitCLIError(err)
 			}
 			return
 		}
@@ -104,7 +95,7 @@ func main() {
 	// In this case, show CLI help (user likely wants CLI usage)
 	if hasCLIOnlyFlags(args) {
 		if err := RunCLIMode(); err != nil {
-			log.Fatalf("CLI error: %v", err)
+			exitCLIError(err)
 		}
 		return
 	}
@@ -249,6 +240,14 @@ func hasCLIOnlyFlags(args []string) bool {
 		}
 	}
 	return false
+}
+
+func exitCLIError(err error) {
+	_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	if _, ok := err.(*usageError); ok {
+		os.Exit(exitUsage)
+	}
+	os.Exit(exitError)
 }
 
 func getEnv(key, def string) string {
