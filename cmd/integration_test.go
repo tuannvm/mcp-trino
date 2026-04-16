@@ -68,8 +68,8 @@ func TestIntegration_HelpFlag(t *testing.T) {
 	}
 
 	outputStr := string(output)
-	if !strings.Contains(outputStr, "Usage of mcp-trino") {
-		t.Errorf("Expected help output to contain usage, got: %s", outputStr)
+	if !strings.Contains(outputStr, "mcp-trino") || !strings.Contains(outputStr, "SYNOPSIS") {
+		t.Errorf("Expected help output to contain structured help, got: %s", outputStr)
 	}
 }
 
