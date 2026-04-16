@@ -87,9 +87,9 @@ func (c *Commands) Catalogs(ctx context.Context) error {
 		})
 	}
 
-	fmt.Fprintln(c.out, "Catalogs:")
+	_, _ = fmt.Fprintln(c.out, "Catalogs:")
 	for _, catalog := range catalogs {
-		fmt.Fprintf(c.out, "  - %s\n", catalog)
+		_, _ = fmt.Fprintf(c.out, "  - %s\n", catalog)
 	}
 	return nil
 }
@@ -115,9 +115,9 @@ func (c *Commands) Schemas(ctx context.Context, catalog string) error {
 		})
 	}
 
-	fmt.Fprintf(c.out, "Schemas in catalog '%s':\n", catalog)
+	_, _ = fmt.Fprintf(c.out, "Schemas in catalog '%s':\n", catalog)
 	for _, schema := range schemas {
-		fmt.Fprintf(c.out, "  - %s\n", schema)
+		_, _ = fmt.Fprintf(c.out, "  - %s\n", schema)
 	}
 	return nil
 }
@@ -150,9 +150,9 @@ func (c *Commands) Tables(ctx context.Context, catalog, schema string) error {
 		})
 	}
 
-	fmt.Fprintf(c.out, "Tables in %s.%s:\n", catalog, schema)
+	_, _ = fmt.Fprintf(c.out, "Tables in %s.%s:\n", catalog, schema)
 	for _, table := range tables {
-		fmt.Fprintf(c.out, "  - %s\n", table)
+		_, _ = fmt.Fprintf(c.out, "  - %s\n", table)
 	}
 	return nil
 }
@@ -172,8 +172,8 @@ func (c *Commands) Describe(ctx context.Context, table string) error {
 		return c.outputJSON(schemaInfo)
 	}
 
-	fmt.Fprintf(c.out, "Table: %s\n", table)
-	fmt.Fprintln(c.out, "\nColumns:")
+	_, _ = fmt.Fprintf(c.out, "Table: %s\n", table)
+	_, _ = fmt.Fprintln(c.out, "\nColumns:")
 	for _, row := range schemaInfo.Rows {
 		colName := fmt.Sprintf("%v", row["Column"])
 		colType := fmt.Sprintf("%v", row["Type"])
@@ -187,9 +187,9 @@ func (c *Commands) Describe(ctx context.Context, table string) error {
 			}
 			extra += fmt.Sprintf("# %s", comment)
 		}
-		fmt.Fprintf(c.out, "  - %-30s %-20s%s\n", colName, colType, extra)
+		_, _ = fmt.Fprintf(c.out, "  - %-30s %-20s%s\n", colName, colType, extra)
 	}
-	fmt.Fprintf(c.out, "\n%d column(s)\n", len(schemaInfo.Rows))
+	_, _ = fmt.Fprintf(c.out, "\n%d column(s)\n", len(schemaInfo.Rows))
 	return nil
 }
 
@@ -211,10 +211,10 @@ func (c *Commands) Explain(ctx context.Context, query string, formatOpt string) 
 		})
 	}
 
-	fmt.Fprintf(c.out, "Query Plan for: %s\n\n", query)
+	_, _ = fmt.Fprintf(c.out, "Query Plan for: %s\n\n", query)
 	for _, row := range result.Rows {
 		for _, val := range row {
-			fmt.Fprintf(c.out, "%v\n", val)
+			_, _ = fmt.Fprintf(c.out, "%v\n", val)
 		}
 	}
 	return nil
@@ -245,7 +245,7 @@ func (c *Commands) outputCSV(results interface{}) error {
 	}
 
 	if len(queryResults.Rows) == 0 {
-		fmt.Fprintln(c.out, "No results")
+		_, _ = fmt.Fprintln(c.out, "No results")
 		return nil
 	}
 
@@ -275,7 +275,7 @@ func (c *Commands) outputCSV(results interface{}) error {
 	}
 
 	if queryResults.Truncated {
-		fmt.Fprintf(c.out, "# %d row(s) (truncated, max %d)\n", len(queryResults.Rows), queryResults.MaxRows)
+		_, _ = fmt.Fprintf(c.out, "# %d row(s) (truncated, max %d)\n", len(queryResults.Rows), queryResults.MaxRows)
 	}
 	return nil
 }
@@ -287,7 +287,7 @@ func (c *Commands) outputTable(results interface{}) error {
 	}
 
 	if len(queryResults.Rows) == 0 {
-		fmt.Fprintln(c.out, "No results")
+		_, _ = fmt.Fprintln(c.out, "No results")
 		return nil
 	}
 
@@ -296,7 +296,7 @@ func (c *Commands) outputTable(results interface{}) error {
 	tw := tabwriter.NewWriter(c.out, 0, 0, 2, ' ', 0)
 
 	// Header
-	fmt.Fprintln(tw, strings.Join(columns, "\t"))
+	_, _ = fmt.Fprintln(tw, strings.Join(columns, "\t"))
 
 	// Separator
 	seps := make([]string, len(columns))
@@ -310,7 +310,7 @@ func (c *Commands) outputTable(results interface{}) error {
 		}
 		seps[i] = strings.Repeat("-", width)
 	}
-	fmt.Fprintln(tw, strings.Join(seps, "\t"))
+	_, _ = fmt.Fprintln(tw, strings.Join(seps, "\t"))
 
 	// Data rows
 	vals := make([]string, len(columns))
@@ -318,7 +318,7 @@ func (c *Commands) outputTable(results interface{}) error {
 		for i, col := range columns {
 			vals[i] = fmt.Sprintf("%v", row[col])
 		}
-		fmt.Fprintln(tw, strings.Join(vals, "\t"))
+		_, _ = fmt.Fprintln(tw, strings.Join(vals, "\t"))
 	}
 
 	if err := tw.Flush(); err != nil {
@@ -326,9 +326,9 @@ func (c *Commands) outputTable(results interface{}) error {
 	}
 
 	if queryResults.Truncated {
-		fmt.Fprintf(c.out, "\n%d row(s) (truncated, max %d)\n", len(queryResults.Rows), queryResults.MaxRows)
+		_, _ = fmt.Fprintf(c.out, "\n%d row(s) (truncated, max %d)\n", len(queryResults.Rows), queryResults.MaxRows)
 	} else {
-		fmt.Fprintf(c.out, "\n%d row(s)\n", len(queryResults.Rows))
+		_, _ = fmt.Fprintf(c.out, "\n%d row(s)\n", len(queryResults.Rows))
 	}
 	return nil
 }

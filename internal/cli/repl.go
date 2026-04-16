@@ -44,17 +44,17 @@ func NewREPLWithReader(commands *Commands, catalog, schema string, in io.Reader)
 
 // Run starts the interactive REPL loop
 func (r *REPL) Run(ctx context.Context) error {
-	fmt.Fprintln(r.out, "mcp-trino CLI - Interactive Mode")
-	fmt.Fprintln(r.out, "Type '\\help' for help, '\\quit' or Ctrl-D to exit")
-	fmt.Fprintln(r.out)
+	_, _ = fmt.Fprintln(r.out, "mcp-trino CLI - Interactive Mode")
+	_, _ = fmt.Fprintln(r.out, "Type '\\help' for help, '\\quit' or Ctrl-D to exit")
+	_, _ = fmt.Fprintln(r.out)
 
 	history := []string{}
 
 	for {
-		fmt.Fprint(r.out, r.prompt)
+		_, _ = fmt.Fprint(r.out, r.prompt)
 
 		if !r.scanner.Scan() {
-			fmt.Fprintln(r.out)
+			_, _ = fmt.Fprintln(r.out)
 			return nil
 		}
 
@@ -70,7 +70,7 @@ func (r *REPL) Run(ctx context.Context) error {
 				if err == ErrExitREPL {
 					return nil
 				}
-				fmt.Fprintf(r.commands.errOut, "Error: %v\n", err)
+				_, _ = fmt.Fprintf(r.commands.errOut, "Error: %v\n", err)
 			}
 			continue
 		}
@@ -78,7 +78,7 @@ func (r *REPL) Run(ctx context.Context) error {
 		// Handle multi-line queries
 		query := line
 		for !strings.HasSuffix(query, ";") && r.hasMoreInput(query) {
-			fmt.Fprint(r.out, "... ")
+			_, _ = fmt.Fprint(r.out, "... ")
 			if !r.scanner.Scan() {
 				if err := r.scanner.Err(); err != nil {
 					return fmt.Errorf("multiline input error: %w", err)
@@ -96,14 +96,14 @@ func (r *REPL) Run(ctx context.Context) error {
 
 		startTime := time.Now()
 		if err := r.commands.Query(ctx, query); err != nil {
-			fmt.Fprintf(r.commands.errOut, "Error: %v\n", err)
+			_, _ = fmt.Fprintf(r.commands.errOut, "Error: %v\n", err)
 		} else {
 			duration := time.Since(startTime)
 			if duration > time.Second {
-				fmt.Fprintf(r.out, "(%v)\n", duration.Round(time.Millisecond))
+				_, _ = fmt.Fprintf(r.out, "(%v)\n", duration.Round(time.Millisecond))
 			}
 		}
-		fmt.Fprintln(r.out)
+		_, _ = fmt.Fprintln(r.out)
 	}
 }
 
@@ -150,7 +150,7 @@ func (r *REPL) handleMetaCommand(ctx context.Context, cmd string, history *[]str
 		return r.commands.Describe(ctx, parts[1])
 	case "\\format":
 		if len(parts) < 2 {
-			fmt.Fprintf(r.out, "Current format: %s\n", r.commands.format)
+			_, _ = fmt.Fprintf(r.out, "Current format: %s\n", r.commands.format)
 			return nil
 		}
 		format := strings.ToLower(parts[1])
@@ -158,9 +158,9 @@ func (r *REPL) handleMetaCommand(ctx context.Context, cmd string, history *[]str
 			return fmt.Errorf("invalid format. Supported: table, json, csv")
 		}
 		r.commands.format = format
-		fmt.Fprintf(r.out, "Output format set to: %s\n", format)
+		_, _ = fmt.Fprintf(r.out, "Output format set to: %s\n", format)
 	case "\\timing":
-		fmt.Fprintln(r.out, "Timing display is always enabled for queries > 1s")
+		_, _ = fmt.Fprintln(r.out, "Timing display is always enabled for queries > 1s")
 	default:
 		return fmt.Errorf("unknown command: %s (type \\help for available commands)", command)
 	}
@@ -197,33 +197,33 @@ func (r *REPL) hasMoreInput(query string) bool {
 
 // printHelp displays help information for REPL commands
 func (r *REPL) printHelp() {
-	fmt.Fprintln(r.out, "Meta-commands:")
-	fmt.Fprintln(r.out, "  \\help              Display this help")
-	fmt.Fprintln(r.out, "  \\quit, \\exit, \\q  Exit the REPL")
-	fmt.Fprintln(r.out, "  \\history           Display command history")
-	fmt.Fprintln(r.out, "  \\catalogs          List all catalogs")
-	fmt.Fprintln(r.out, "  \\schemas [cat]     List schemas (optional catalog)")
-	fmt.Fprintln(r.out, "  \\tables [cat sch]  List tables (optional catalog.schema)")
-	fmt.Fprintln(r.out, "  \\describe <table>  Describe table (format: catalog.schema.table)")
-	fmt.Fprintln(r.out, "  \\format <fmt>      Set output format (table, json, csv)")
-	fmt.Fprintln(r.out)
-	fmt.Fprintln(r.out, "SQL Queries:")
-	fmt.Fprintln(r.out, "  SELECT ...         Execute a SQL query")
-	fmt.Fprintln(r.out, "  EXPLAIN ...        Analyze query execution plan")
-	fmt.Fprintln(r.out)
-	fmt.Fprintln(r.out, "Tips:")
-	fmt.Fprintln(r.out, "  - Use ; to terminate multi-line queries")
-	fmt.Fprintln(r.out, "  - Ctrl-D exits the REPL")
+	_, _ = fmt.Fprintln(r.out, "Meta-commands:")
+	_, _ = fmt.Fprintln(r.out, "  \\help              Display this help")
+	_, _ = fmt.Fprintln(r.out, "  \\quit, \\exit, \\q  Exit the REPL")
+	_, _ = fmt.Fprintln(r.out, "  \\history           Display command history")
+	_, _ = fmt.Fprintln(r.out, "  \\catalogs          List all catalogs")
+	_, _ = fmt.Fprintln(r.out, "  \\schemas [cat]     List schemas (optional catalog)")
+	_, _ = fmt.Fprintln(r.out, "  \\tables [cat sch]  List tables (optional catalog.schema)")
+	_, _ = fmt.Fprintln(r.out, "  \\describe <table>  Describe table (format: catalog.schema.table)")
+	_, _ = fmt.Fprintln(r.out, "  \\format <fmt>      Set output format (table, json, csv)")
+	_, _ = fmt.Fprintln(r.out)
+	_, _ = fmt.Fprintln(r.out, "SQL Queries:")
+	_, _ = fmt.Fprintln(r.out, "  SELECT ...         Execute a SQL query")
+	_, _ = fmt.Fprintln(r.out, "  EXPLAIN ...        Analyze query execution plan")
+	_, _ = fmt.Fprintln(r.out)
+	_, _ = fmt.Fprintln(r.out, "Tips:")
+	_, _ = fmt.Fprintln(r.out, "  - Use ; to terminate multi-line queries")
+	_, _ = fmt.Fprintln(r.out, "  - Ctrl-D exits the REPL")
 }
 
 // printHistory displays command history
 func (r *REPL) printHistory(history *[]string) {
 	if len(*history) == 0 {
-		fmt.Fprintln(r.out, "No history")
+		_, _ = fmt.Fprintln(r.out, "No history")
 		return
 	}
 
 	for i, cmd := range *history {
-		fmt.Fprintf(r.out, "%4d  %s\n", i+1, cmd)
+		_, _ = fmt.Fprintf(r.out, "%4d  %s\n", i+1, cmd)
 	}
 }
