@@ -1,12 +1,19 @@
 package cli
 
 import (
+	"bytes"
+	"context"
+	"fmt"
+	"strings"
 	"testing"
+
+	"github.com/tuannvm/mcp-trino/internal/trino"
 )
 
 func TestNewREPL(t *testing.T) {
 	mockClient := &mockTrinoClient{}
-	cmd := NewCommands(mockClient, "table")
+	var buf bytes.Buffer
+	cmd := NewCommandsWithWriters(mockClient, "table", &buf, &buf)
 
 	repl := NewREPL(cmd, "memory", "default")
 
@@ -20,7 +27,8 @@ func TestNewREPL(t *testing.T) {
 
 func TestNewREPL_EmptyCatalogSchema(t *testing.T) {
 	mockClient := &mockTrinoClient{}
-	cmd := NewCommands(mockClient, "table")
+	var buf bytes.Buffer
+	cmd := NewCommandsWithWriters(mockClient, "table", &buf, &buf)
 
 	repl := NewREPL(cmd, "", "")
 
@@ -31,7 +39,8 @@ func TestNewREPL_EmptyCatalogSchema(t *testing.T) {
 
 func TestNewREPL_CatalogOnly_NoSchema(t *testing.T) {
 	mockClient := &mockTrinoClient{}
-	cmd := NewCommands(mockClient, "table")
+	var buf bytes.Buffer
+	cmd := NewCommandsWithWriters(mockClient, "table", &buf, &buf)
 
 	repl := NewREPL(cmd, "memory", "")
 
@@ -42,7 +51,8 @@ func TestNewREPL_CatalogOnly_NoSchema(t *testing.T) {
 
 func TestNewREPL_CatalogAndSchema(t *testing.T) {
 	mockClient := &mockTrinoClient{}
-	cmd := NewCommands(mockClient, "table")
+	var buf bytes.Buffer
+	cmd := NewCommandsWithWriters(mockClient, "table", &buf, &buf)
 
 	repl := NewREPL(cmd, "memory", "default")
 
@@ -117,23 +127,179 @@ func TestHasMoreInput(t *testing.T) {
 }
 
 func TestREPL_PrintHelp(t *testing.T) {
-	repl := &REPL{}
-	// Just verify it doesn't panic
+	var buf bytes.Buffer
+	repl := &REPL{out: &buf}
 	repl.printHelp()
+
+	output := buf.String()
+	if !strings.Contains(output, "Meta-commands") {
+		t.Errorf("expected help text, got: %s", output)
+	}
 }
 
 func TestREPL_PrintHistory_Empty(t *testing.T) {
-	repl := &REPL{}
+	var buf bytes.Buffer
+	repl := &REPL{out: &buf}
 	history := []string{}
 
-	// Just verify it doesn't panic
 	repl.printHistory(&history)
+
+	if !strings.Contains(buf.String(), "No history") {
+		t.Errorf("expected 'No history', got: %s", buf.String())
+	}
+}
+
+func TestREPL_RunWithInput(t *testing.T) {
+	client := &mockTrinoClient{
+		catalogs: []string{"cat1", "cat2"},
+	}
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, "table", &stdout, &stderr)
+
+	input := strings.NewReader("\\catalogs\n\\quit\n")
+	repl := NewREPLWithReader(cmd, "", "", input)
+
+	ctx := context.Background()
+	err := repl.Run(ctx)
+	if err != nil {
+		t.Fatalf("REPL.Run() failed: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "cat1") {
+		t.Errorf("expected catalogs in output, got: %s", output)
+	}
+}
+
+func TestREPL_RunQuery(t *testing.T) {
+	client := &mockTrinoClient{
+		queryResult: &trino.QueryResult{
+			Rows: []map[string]interface{}{
+				{"val": 42},
+			},
+			MaxRows: 10000,
+		},
+	}
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, "table", &stdout, &stderr)
+
+	input := strings.NewReader("SELECT 42;\n\\quit\n")
+	repl := NewREPLWithReader(cmd, "", "", input)
+
+	err := repl.Run(context.Background())
+	if err != nil {
+		t.Fatalf("REPL.Run() failed: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "42") {
+		t.Errorf("expected query result in output, got: %s", output)
+	}
+}
+
+func TestREPL_QueryError_ToStderr(t *testing.T) {
+	client := &mockTrinoClient{
+		queryError: fmt.Errorf("connection refused"),
+	}
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, "table", &stdout, &stderr)
+
+	input := strings.NewReader("SELECT 1;\n\\quit\n")
+	repl := NewREPLWithReader(cmd, "", "", input)
+
+	err := repl.Run(context.Background())
+	if err != nil {
+		t.Fatalf("REPL.Run() failed: %v", err)
+	}
+
+	if !strings.Contains(stderr.String(), "connection refused") {
+		t.Errorf("expected error on stderr, got stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	// Error should NOT appear on stdout
+	if strings.Contains(stdout.String(), "connection refused") {
+		t.Error("error message should not appear on stdout")
+	}
+}
+
+func TestREPL_MetaCommandError_ToStderr(t *testing.T) {
+	client := &mockTrinoClient{}
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, "table", &stdout, &stderr)
+
+	input := strings.NewReader("\\describe\n\\quit\n")
+	repl := NewREPLWithReader(cmd, "", "", input)
+
+	err := repl.Run(context.Background())
+	if err != nil {
+		t.Fatalf("REPL.Run() failed: %v", err)
+	}
+
+	if !strings.Contains(stderr.String(), "usage:") {
+		t.Errorf("expected usage error on stderr, got stderr=%q", stderr.String())
+	}
+}
+
+func TestREPL_FormatCommand(t *testing.T) {
+	client := &mockTrinoClient{}
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, "table", &stdout, &stderr)
+
+	input := strings.NewReader("\\format json\n\\format\n\\quit\n")
+	repl := NewREPLWithReader(cmd, "", "", input)
+
+	err := repl.Run(context.Background())
+	if err != nil {
+		t.Fatalf("REPL.Run() failed: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Output format set to: json") {
+		t.Errorf("expected format change confirmation, got: %s", output)
+	}
+	if !strings.Contains(output, "Current format: json") {
+		t.Errorf("expected current format display, got: %s", output)
+	}
+}
+
+func TestREPL_InvalidFormatCommand(t *testing.T) {
+	client := &mockTrinoClient{}
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, "table", &stdout, &stderr)
+
+	input := strings.NewReader("\\format xml\n\\quit\n")
+	repl := NewREPLWithReader(cmd, "", "", input)
+
+	_ = repl.Run(context.Background())
+
+	if !strings.Contains(stderr.String(), "invalid format") {
+		t.Errorf("expected 'invalid format' on stderr, got: %s", stderr.String())
+	}
+}
+
+func TestREPL_EOF_GracefulExit(t *testing.T) {
+	client := &mockTrinoClient{}
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, "table", &stdout, &stderr)
+
+	// Empty input = immediate EOF
+	input := strings.NewReader("")
+	repl := NewREPLWithReader(cmd, "", "", input)
+
+	err := repl.Run(context.Background())
+	if err != nil {
+		t.Fatalf("REPL.Run() should exit gracefully on EOF, got: %v", err)
+	}
 }
 
 func TestREPL_PrintHistory_WithItems(t *testing.T) {
-	repl := &REPL{}
+	var buf bytes.Buffer
+	repl := &REPL{out: &buf}
 	history := []string{"SELECT 1", "SELECT 2", "SELECT 3"}
 
-	// Just verify it doesn't panic
 	repl.printHistory(&history)
+
+	output := buf.String()
+	if !strings.Contains(output, "SELECT 1") || !strings.Contains(output, "SELECT 3") {
+		t.Errorf("expected history items in output, got: %s", output)
+	}
 }

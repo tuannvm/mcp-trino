@@ -158,13 +158,37 @@ mcp-trino --format csv query "SELECT 1"
 mcp-trino --format table query "SELECT 1"  # default
 ```
 
+### Built-in Help
+
+Every command has structured, LLM-friendly help output:
+
+```bash
+# Main help with all commands, flags, examples, and environment variables
+mcp-trino --help
+
+# Per-subcommand help
+mcp-trino query --help
+mcp-trino describe --help
+```
+
+Help output follows Unix man-page conventions with sections: NAME, SYNOPSIS, DESCRIPTION, COMMANDS, FLAGS, EXAMPLES, ENVIRONMENT, and CONFIGURATION.
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Runtime error (connection failed, query error, etc.) |
+| 2 | Usage error (unknown command, invalid flags, missing arguments) |
+
 ### Named Profiles
 
-mcp-trino supports named connection profiles for easy switching between Trino environments:
+mcp-trino supports named connection profiles for easy switching between Trino environments.
 
-**Configuration File** (~/.config/trino/config.yaml):
+**Configuration File** — supports both YAML (`~/.config/trino/config.yaml`) and JSON (`~/.config/trino/config.json`):
 
 ```yaml
+# ~/.config/trino/config.yaml
 current: prod
 
 profiles:
@@ -194,6 +218,31 @@ profiles:
 output:
   format: table
 ```
+
+Or equivalently in JSON:
+
+```json
+{
+  "current": "prod",
+  "profiles": {
+    "prod": {
+      "host": "trino.example.com",
+      "port": 443,
+      "user": "prod_user",
+      "catalog": "hive",
+      "ssl": { "enabled": true }
+    },
+    "dev": {
+      "host": "localhost",
+      "port": 8080,
+      "user": "trino"
+    }
+  },
+  "output": { "format": "table" }
+}
+```
+
+When both files exist, `config.json` takes precedence. New configs default to JSON.
 
 **Profile Management Commands:**
 

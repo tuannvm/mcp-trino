@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -299,5 +301,203 @@ func TestIsTTY(t *testing.T) {
 	result := isTTY()
 	if result != true && result != false {
 		t.Errorf("isTTY() returned non-boolean value")
+	}
+}
+
+// --- Structured help output tests ---
+
+func TestMainHelp_StructuredSections(t *testing.T) {
+	var buf bytes.Buffer
+	printMainHelp(&buf)
+	output := buf.String()
+
+	requiredSections := []string{
+		"NAME", "SYNOPSIS", "DESCRIPTION", "COMMANDS",
+		"FLAGS", "EXAMPLES", "ENVIRONMENT", "CONFIGURATION",
+	}
+	for _, section := range requiredSections {
+		if !strings.Contains(output, section) {
+			t.Errorf("main help missing required section: %s", section)
+		}
+	}
+
+	// Verify all subcommands are documented
+	commands := []string{"query", "catalogs", "schemas", "tables", "describe", "explain", "interactive", "config"}
+	for _, cmd := range commands {
+		if !strings.Contains(output, cmd) {
+			t.Errorf("main help missing command: %s", cmd)
+		}
+	}
+
+	// Verify all env vars are documented
+	envVars := []string{
+		"TRINO_HOST", "TRINO_PORT", "TRINO_USER", "TRINO_PASSWORD",
+		"TRINO_CATALOG", "TRINO_SCHEMA", "TRINO_PROFILE",
+		"TRINO_QUERY_TIMEOUT", "NO_COLOR",
+	}
+	for _, env := range envVars {
+		if !strings.Contains(output, env) {
+			t.Errorf("main help missing env var: %s", env)
+		}
+	}
+}
+
+func TestSubcommandHelp_AllCommands(t *testing.T) {
+	commands := []string{"query", "catalogs", "schemas", "tables", "describe", "explain", "config", "interactive"}
+
+	for _, cmd := range commands {
+		t.Run(cmd, func(t *testing.T) {
+			var buf bytes.Buffer
+			printSubcommandHelp(&buf, cmd)
+			output := buf.String()
+
+			// Every subcommand help must have NAME, SYNOPSIS, DESCRIPTION, EXAMPLES
+			for _, section := range []string{"NAME", "SYNOPSIS", "DESCRIPTION"} {
+				if !strings.Contains(output, section) {
+					t.Errorf("%s --help missing section: %s", cmd, section)
+				}
+			}
+
+			// Must mention the command name
+			if !strings.Contains(output, "mcp-trino "+cmd) {
+				t.Errorf("%s --help doesn't mention 'mcp-trino %s'", cmd, cmd)
+			}
+		})
+	}
+}
+
+func TestSubcommandHelp_Unknown(t *testing.T) {
+	var buf bytes.Buffer
+	printSubcommandHelp(&buf, "nonexistent")
+	output := buf.String()
+	if !strings.Contains(output, "No help available") {
+		t.Errorf("expected 'No help available' for unknown command, got: %s", output)
+	}
+}
+
+// --- Exit code / usageError tests ---
+
+func TestRunCLI_UsageError_UnknownCommand(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := runCLI(&stdout, &stderr, []string{"qury"})
+	if err == nil {
+		t.Fatal("expected error for unknown command")
+	}
+	if _, ok := err.(*usageError); !ok {
+		t.Errorf("expected *usageError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "unknown command") {
+		t.Errorf("expected 'unknown command' in error, got: %v", err)
+	}
+}
+
+func TestRunCLI_UsageError_InvalidFormat(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := runCLI(&stdout, &stderr, []string{"--format", "xml", "catalogs"})
+	if err == nil {
+		t.Fatal("expected error for invalid format")
+	}
+	if _, ok := err.(*usageError); !ok {
+		t.Errorf("expected *usageError for invalid format, got %T: %v", err, err)
+	}
+}
+
+func TestRunCLI_UsageError_QueryNoArg(t *testing.T) {
+	// Set required env vars so we get past config validation
+	_ = os.Setenv("TRINO_HOST", "localhost")
+	_ = os.Setenv("TRINO_USER", "test")
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TRINO_HOST")
+		_ = os.Unsetenv("TRINO_USER")
+	})
+
+	var stdout, stderr bytes.Buffer
+	err := runCLI(&stdout, &stderr, []string{"query"})
+	if err == nil {
+		t.Fatal("expected error for query with no SQL arg")
+	}
+	if _, ok := err.(*usageError); !ok {
+		t.Errorf("expected *usageError for query with no arg, got %T: %v", err, err)
+	}
+}
+
+func TestRunCLI_UsageError_DescribeNoArg(t *testing.T) {
+	_ = os.Setenv("TRINO_HOST", "localhost")
+	_ = os.Setenv("TRINO_USER", "test")
+	t.Cleanup(func() {
+		_ = os.Unsetenv("TRINO_HOST")
+		_ = os.Unsetenv("TRINO_USER")
+	})
+
+	var stdout, stderr bytes.Buffer
+	err := runCLI(&stdout, &stderr, []string{"describe"})
+	if err == nil {
+		t.Fatal("expected error for describe with no table arg")
+	}
+	if _, ok := err.(*usageError); !ok {
+		t.Errorf("expected *usageError for describe with no arg, got %T: %v", err, err)
+	}
+}
+
+func TestRunCLI_UsageError_ConfigProfileNoSubcommand(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := runCLI(&stdout, &stderr, []string{"config", "profile"})
+	if err == nil {
+		t.Fatal("expected error for config profile with no subcommand")
+	}
+	if _, ok := err.(*usageError); !ok {
+		t.Errorf("expected *usageError, got %T: %v", err, err)
+	}
+}
+
+func TestRunCLI_NoError_HelpFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := runCLI(&stdout, &stderr, []string{"--help"})
+	if err != nil {
+		t.Errorf("--help should not return error, got: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "NAME") {
+		t.Error("--help should print structured help to stderr")
+	}
+}
+
+func TestRunCLI_NoError_VersionFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := runCLI(&stdout, &stderr, []string{"--version"})
+	if err != nil {
+		t.Errorf("--version should not return error, got: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "mcp-trino") {
+		t.Error("--version should print version to stdout")
+	}
+}
+
+func TestRunCLI_NoError_SubcommandHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := runCLI(&stdout, &stderr, []string{"query", "--help"})
+	if err != nil {
+		t.Errorf("query --help should not return error, got: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "SYNOPSIS") {
+		t.Error("query --help should print structured help")
+	}
+}
+
+func TestRunCLI_MissingHost(t *testing.T) {
+	// Use a profile that doesn't set host to override defaults
+	tmpDir := t.TempDir()
+	configPath := tmpDir + "/config.json"
+	_ = os.WriteFile(configPath, []byte(`{"current":"empty","profiles":{"empty":{"port":8080,"user":"u"}}}`), 0600)
+
+	_ = os.Unsetenv("TRINO_HOST")
+	_ = os.Unsetenv("TRINO_USER")
+
+	var stdout, stderr bytes.Buffer
+	err := runCLI(&stdout, &stderr, []string{"--config", configPath, "catalogs"})
+	if err == nil {
+		t.Fatal("expected error when host is missing")
+	}
+	if !strings.Contains(err.Error(), "host not set") {
+		t.Errorf("expected 'host not set' error, got: %v", err)
 	}
 }
