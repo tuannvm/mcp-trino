@@ -32,3 +32,4 @@ vendor/
 .claude-plugin/mcp-trino.exe
 .claude-plugin/.mcp-trino-version
 .claude/
+.claude/harness/

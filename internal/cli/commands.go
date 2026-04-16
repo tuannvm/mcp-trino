@@ -2,11 +2,14 @@ package cli
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/tuannvm/mcp-trino/internal/trino"
 )
@@ -27,6 +30,8 @@ type TrinoClient interface {
 type Commands struct {
 	client TrinoClient
 	format string // output format: table, json, csv
+	out    io.Writer
+	errOut io.Writer
 }
 
 // NewCommands creates a new CLI commands handler
@@ -37,6 +42,21 @@ func NewCommands(client TrinoClient, format string) *Commands {
 	return &Commands{
 		client: client,
 		format: format,
+		out:    os.Stdout,
+		errOut: os.Stderr,
+	}
+}
+
+// NewCommandsWithWriters creates a new CLI commands handler with custom writers
+func NewCommandsWithWriters(client TrinoClient, format string, out, errOut io.Writer) *Commands {
+	if format == "" {
+		format = "table"
+	}
+	return &Commands{
+		client: client,
+		format: format,
+		out:    out,
+		errOut: errOut,
 	}
 }
 
@@ -51,7 +71,6 @@ func (c *Commands) Query(ctx context.Context, query string) error {
 		return fmt.Errorf("query failed: %w", err)
 	}
 
-	// Format and display results
 	return c.formatOutput(results)
 }
 
@@ -68,22 +87,19 @@ func (c *Commands) Catalogs(ctx context.Context) error {
 		})
 	}
 
-	// Simple table output
-	fmt.Println("Catalogs:")
+	fmt.Fprintln(c.out, "Catalogs:")
 	for _, catalog := range catalogs {
-		fmt.Printf("  - %s\n", catalog)
+		fmt.Fprintf(c.out, "  - %s\n", catalog)
 	}
 	return nil
 }
 
 // Schemas lists schemas in a catalog
 func (c *Commands) Schemas(ctx context.Context, catalog string) error {
-	// Use default catalog from config if not specified
 	if catalog == "" {
-		// Get catalog from environment or default
 		catalog = os.Getenv("TRINO_CATALOG")
 		if catalog == "" {
-			catalog = "memory" // default Trino catalog
+			catalog = "memory"
 		}
 	}
 
@@ -99,26 +115,25 @@ func (c *Commands) Schemas(ctx context.Context, catalog string) error {
 		})
 	}
 
-	fmt.Printf("Schemas in catalog '%s':\n", catalog)
+	fmt.Fprintf(c.out, "Schemas in catalog '%s':\n", catalog)
 	for _, schema := range schemas {
-		fmt.Printf("  - %s\n", schema)
+		fmt.Fprintf(c.out, "  - %s\n", schema)
 	}
 	return nil
 }
 
 // Tables lists tables in a schema
 func (c *Commands) Tables(ctx context.Context, catalog, schema string) error {
-	// Use defaults from config if not specified
 	if catalog == "" {
 		catalog = os.Getenv("TRINO_CATALOG")
 		if catalog == "" {
-			catalog = "memory" // default Trino catalog
+			catalog = "memory"
 		}
 	}
 	if schema == "" {
 		schema = os.Getenv("TRINO_SCHEMA")
 		if schema == "" {
-			schema = "default" // default Trino schema
+			schema = "default"
 		}
 	}
 
@@ -135,9 +150,9 @@ func (c *Commands) Tables(ctx context.Context, catalog, schema string) error {
 		})
 	}
 
-	fmt.Printf("Tables in %s.%s:\n", catalog, schema)
+	fmt.Fprintf(c.out, "Tables in %s.%s:\n", catalog, schema)
 	for _, table := range tables {
-		fmt.Printf("  - %s\n", table)
+		fmt.Fprintf(c.out, "  - %s\n", table)
 	}
 	return nil
 }
@@ -157,9 +172,8 @@ func (c *Commands) Describe(ctx context.Context, table string) error {
 		return c.outputJSON(schemaInfo)
 	}
 
-	// Use the requested table name for display
-	fmt.Printf("Table: %s\n", table)
-	fmt.Println("\nColumns:")
+	fmt.Fprintf(c.out, "Table: %s\n", table)
+	fmt.Fprintln(c.out, "\nColumns:")
 	for _, row := range schemaInfo.Rows {
 		colName := fmt.Sprintf("%v", row["Column"])
 		colType := fmt.Sprintf("%v", row["Type"])
@@ -173,9 +187,9 @@ func (c *Commands) Describe(ctx context.Context, table string) error {
 			}
 			extra += fmt.Sprintf("# %s", comment)
 		}
-		fmt.Printf("  - %-30s %-20s%s\n", colName, colType, extra)
+		fmt.Fprintf(c.out, "  - %-30s %-20s%s\n", colName, colType, extra)
 	}
-	fmt.Printf("\n%d column(s)\n", len(schemaInfo.Rows))
+	fmt.Fprintf(c.out, "\n%d column(s)\n", len(schemaInfo.Rows))
 	return nil
 }
 
@@ -197,19 +211,16 @@ func (c *Commands) Explain(ctx context.Context, query string, formatOpt string) 
 		})
 	}
 
-	// Print the query plan from the result rows
-	fmt.Printf("Query Plan for: %s\n\n", query)
+	fmt.Fprintf(c.out, "Query Plan for: %s\n\n", query)
 	for _, row := range result.Rows {
-		// EXPLAIN results typically have a single column with the plan
 		for _, val := range row {
-			fmt.Printf("%v\n", val)
+			fmt.Fprintf(c.out, "%v\n", val)
 		}
 	}
 	return nil
 }
 
-// Helper functions
-
+// formatOutput dispatches to the appropriate output formatter
 func (c *Commands) formatOutput(results interface{}) error {
 	switch c.format {
 	case "json":
@@ -217,122 +228,117 @@ func (c *Commands) formatOutput(results interface{}) error {
 	case "csv":
 		return c.outputCSV(results)
 	default:
-		// Default table formatting
 		return c.outputTable(results)
 	}
 }
 
 func (c *Commands) outputJSON(data interface{}) error {
-	encoder := json.NewEncoder(os.Stdout)
+	encoder := json.NewEncoder(c.out)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(data)
 }
 
 func (c *Commands) outputCSV(results interface{}) error {
-	// Type assertion for query results
 	queryResults, ok := results.(*trino.QueryResult)
 	if !ok {
 		return fmt.Errorf("invalid result type")
 	}
 
 	if len(queryResults.Rows) == 0 {
-		fmt.Println("No results")
+		fmt.Fprintln(c.out, "No results")
 		return nil
 	}
 
-	// Extract column names from the first row and sort for deterministic output
-	columns := make([]string, 0, len(queryResults.Rows[0]))
-	for col := range queryResults.Rows[0] {
-		columns = append(columns, col)
-	}
-	sort.Strings(columns)
+	columns := extractSortedColumns(queryResults.Rows[0])
 
-	// Write CSV header
-	for i, col := range columns {
-		if i > 0 {
-			fmt.Print(",")
-		}
-		fmt.Printf("%q", col)
+	w := csv.NewWriter(c.out)
+
+	// Write header
+	if err := w.Write(columns); err != nil {
+		return fmt.Errorf("failed to write CSV header: %w", err)
 	}
-	fmt.Println()
 
 	// Write data rows
+	record := make([]string, len(columns))
 	for _, row := range queryResults.Rows {
 		for i, col := range columns {
-			if i > 0 {
-				fmt.Print(",")
-			}
-			// Convert value to string and quote it
-			val := fmt.Sprintf("%v", row[col])
-			fmt.Printf("%q", val)
+			record[i] = fmt.Sprintf("%v", row[col])
 		}
-		fmt.Println()
+		if err := w.Write(record); err != nil {
+			return fmt.Errorf("failed to write CSV row: %w", err)
+		}
+	}
+
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return fmt.Errorf("CSV write error: %w", err)
 	}
 
 	if queryResults.Truncated {
-		fmt.Printf("# %d row(s) (truncated, max %d)\n", len(queryResults.Rows), queryResults.MaxRows)
+		fmt.Fprintf(c.out, "# %d row(s) (truncated, max %d)\n", len(queryResults.Rows), queryResults.MaxRows)
 	}
 	return nil
 }
 
 func (c *Commands) outputTable(results interface{}) error {
-	// Type assertion for query results
 	queryResults, ok := results.(*trino.QueryResult)
 	if !ok {
 		return fmt.Errorf("invalid result type")
 	}
 
 	if len(queryResults.Rows) == 0 {
-		fmt.Println("No results")
+		fmt.Fprintln(c.out, "No results")
 		return nil
 	}
 
-	// Extract column names from the first row and sort for deterministic output
-	columns := make([]string, 0, len(queryResults.Rows[0]))
-	for col := range queryResults.Rows[0] {
-		columns = append(columns, col)
-	}
-	sort.Strings(columns)
+	columns := extractSortedColumns(queryResults.Rows[0])
 
-	// Calculate column widths
-	colWidths := make([]int, len(columns))
+	tw := tabwriter.NewWriter(c.out, 0, 0, 2, ' ', 0)
+
+	// Header
+	fmt.Fprintln(tw, strings.Join(columns, "\t"))
+
+	// Separator
+	seps := make([]string, len(columns))
 	for i, col := range columns {
-		colWidths[i] = len(col)
-	}
-	for _, row := range queryResults.Rows {
-		for i, col := range columns {
+		width := len(col)
+		for _, row := range queryResults.Rows {
 			strVal := fmt.Sprintf("%v", row[col])
-			if len(strVal) > colWidths[i] {
-				colWidths[i] = len(strVal)
+			if len(strVal) > width {
+				width = len(strVal)
 			}
 		}
+		seps[i] = strings.Repeat("-", width)
 	}
+	fmt.Fprintln(tw, strings.Join(seps, "\t"))
 
-	// Print header
-	for i, col := range columns {
-		fmt.Printf("%-*s", colWidths[i]+2, col)
-	}
-	fmt.Println()
-
-	// Print separator
-	for _, width := range colWidths {
-		fmt.Printf("%-*s", width+2, strings.Repeat("-", width))
-	}
-	fmt.Println()
-
-	// Print data rows
+	// Data rows
+	vals := make([]string, len(columns))
 	for _, row := range queryResults.Rows {
 		for i, col := range columns {
-			fmt.Printf("%-*v", colWidths[i]+2, row[col])
+			vals[i] = fmt.Sprintf("%v", row[col])
 		}
-		fmt.Println()
+		fmt.Fprintln(tw, strings.Join(vals, "\t"))
+	}
+
+	if err := tw.Flush(); err != nil {
+		return fmt.Errorf("table write error: %w", err)
 	}
 
 	if queryResults.Truncated {
-		fmt.Printf("\n%d row(s) (truncated, max %d)\n", len(queryResults.Rows), queryResults.MaxRows)
+		fmt.Fprintf(c.out, "\n%d row(s) (truncated, max %d)\n", len(queryResults.Rows), queryResults.MaxRows)
 	} else {
-		fmt.Printf("\n%d row(s)\n", len(queryResults.Rows))
+		fmt.Fprintf(c.out, "\n%d row(s)\n", len(queryResults.Rows))
 	}
 	return nil
 }
 
+// extractSortedColumns returns sorted column names from a result row
+func extractSortedColumns(row map[string]interface{}) []string {
+	columns := make([]string, 0, len(row))
+	for col := range row {
+		columns = append(columns, col)
+	}
+	sort.Strings(columns)
+	return columns
+}

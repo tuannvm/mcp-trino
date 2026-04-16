@@ -1,88 +1,100 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-
-	"gopkg.in/yaml.v3"
+	"sort"
+	"strings"
 )
 
 // TrinoProfileConfig represents a single Trino connection profile
 type TrinoProfileConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	User     string `yaml:"user"`
-	Password string `yaml:"password"`
-	Catalog  string `yaml:"catalog"`
-	Schema   string `yaml:"schema"`
-	Source   string `yaml:"source"`
-	SSL      struct {
-		Enabled  *bool `yaml:"enabled"` // pointer to distinguish unset vs false
-		Insecure bool  `yaml:"insecure"`
-	} `yaml:"ssl"`
+	Host     string    `json:"host"`
+	Port     int       `json:"port"`
+	User     string    `json:"user"`
+	Password string    `json:"password,omitempty"`
+	Catalog  string    `json:"catalog,omitempty"`
+	Schema   string    `json:"schema,omitempty"`
+	Source   string    `json:"source,omitempty"`
+	SSL      SSLConfig `json:"ssl,omitempty"`
 }
 
-// CLIConfig represents the YAML configuration file structure
+// SSLConfig holds SSL configuration for a profile
+type SSLConfig struct {
+	Enabled  *bool `json:"enabled,omitempty"` // pointer to distinguish unset vs false
+	Insecure bool  `json:"insecure,omitempty"`
+}
+
+// CLIConfig represents the JSON configuration file structure
 type CLIConfig struct {
-	// ConfigPath tracks where this config was loaded from (not saved to YAML)
-	ConfigPath string `yaml:"-"`
+	// ConfigPath tracks where this config was loaded from (not saved to JSON)
+	ConfigPath string `json:"-"`
 
-	Current  string                       `yaml:"current"` // default profile name
-	Profiles map[string]TrinoProfileConfig `yaml:"profiles"`
-	Output   struct {
-		Format string `yaml:"format"` // table, json, csv
-	} `yaml:"output"`
-
-	// Legacy fields for backward compatibility (auto-migrated to profiles)
-	Trino struct {
-		Host     string `yaml:"host"`
-		Port     int    `yaml:"port"`
-		User     string `yaml:"user"`
-		Password string `yaml:"password"`
-		Catalog  string `yaml:"catalog"`
-		Schema   string `yaml:"schema"`
-		Source   string `yaml:"source"`
-		SSL      struct {
-			Enabled  *bool `yaml:"enabled"` // pointer to distinguish unset vs false
-			Insecure bool  `yaml:"insecure"`
-		} `yaml:"ssl"`
-	} `yaml:"trino"`
+	Current  string                        `json:"current"`            // default profile name
+	Profiles map[string]TrinoProfileConfig `json:"profiles"`           // connection profiles
+	Output   OutputConfig                  `json:"output,omitempty"`   // output settings
 }
 
-// LoadCLIConfig loads the CLI configuration from ~/.config/trino/config.yaml
+// OutputConfig holds output formatting configuration
+type OutputConfig struct {
+	Format string `json:"format,omitempty"` // table, json, csv
+}
+
+// LoadCLIConfig loads the CLI configuration from ~/.config/trino/config.json
+// Falls back to reading legacy ~/.config/trino/config.yaml if JSON doesn't exist
 func LoadCLIConfig() (*CLIConfig, error) {
-	// Use XDG config directory: ~/.config/trino/config.yaml
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
 
-	configPath := filepath.Join(homeDir, ".config", "trino", "config.yaml")
+	configDir := filepath.Join(homeDir, ".config", "trino")
+	jsonPath := filepath.Join(configDir, "config.json")
+	yamlPath := filepath.Join(configDir, "config.yaml")
 
-	// If config doesn't exist, return default config
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		cfg := defaultCLIConfig()
-		cfg.ConfigPath = configPath
+	// Try JSON config first
+	if _, err := os.Stat(jsonPath); err == nil {
+		data, readErr := os.ReadFile(jsonPath)
+		if readErr != nil {
+			return nil, fmt.Errorf("failed to read config file: %w", readErr)
+		}
+		cfg, parseErr := parseCLIConfigFromJSON(data)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		cfg.ConfigPath = jsonPath
 		return cfg, nil
 	}
 
-	data, err := os.ReadFile(configPath)
+	// Fall back to legacy YAML config and auto-migrate to JSON
+	if _, err := os.Stat(yamlPath); err == nil {
+		cfg, migrateErr := migrateYAMLConfig(yamlPath, jsonPath)
+		if migrateErr != nil {
+			return nil, fmt.Errorf("failed to migrate YAML config: %w", migrateErr)
+		}
+		return cfg, nil
+	}
+
+	// No config file — return defaults
+	cfg := defaultCLIConfig()
+	cfg.ConfigPath = jsonPath
+	return cfg, nil
+}
+
+// migrateYAMLConfig reads a legacy YAML config, converts it to JSON, and saves it
+// YAML is parsed with minimal stdlib-only support for the known config structure
+func migrateYAMLConfig(yamlPath, jsonPath string) (*CLIConfig, error) {
+	data, err := os.ReadFile(yamlPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %w", err)
+		return nil, fmt.Errorf("failed to read YAML config: %w", err)
 	}
 
-	var cfg CLIConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
-	}
+	cfg := parseSimpleYAML(data)
+	cfg.ConfigPath = jsonPath
 
-	// Auto-migrate legacy flat config to profiles
-	if err := cfg.migrateLegacyConfig(); err != nil {
-		return nil, fmt.Errorf("failed to migrate legacy config: %w", err)
-	}
-
-	// If no profiles exist after migration, ensure we have a default profile
+	// Ensure profiles exist
 	if len(cfg.Profiles) == 0 {
 		cfg.Profiles = defaultCLIConfig().Profiles
 		if cfg.Current == "" {
@@ -90,65 +102,222 @@ func LoadCLIConfig() (*CLIConfig, error) {
 		}
 	}
 
-	cfg.ConfigPath = configPath
-	return &cfg, nil
+	// Save as JSON
+	if err := SaveCLIConfig(cfg); err != nil {
+		return nil, fmt.Errorf("failed to save migrated config: %w", err)
+	}
+
+	return cfg, nil
 }
 
-// ParseCLIConfig parses CLI configuration from YAML data
+// parseSimpleYAML does minimal YAML parsing for the known config structure
+// Handles the two known formats: flat (trino.host) and profiles-based
+func parseSimpleYAML(data []byte) *CLIConfig {
+	cfg := &CLIConfig{
+		Profiles: make(map[string]TrinoProfileConfig),
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var currentSection string
+	var currentProfile string
+	var currentSubsection string
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		// Count leading spaces for indent level
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+
+		// Parse key: value
+		parts := strings.SplitN(trimmed, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		value := cleanYAMLValue(strings.TrimSpace(parts[1]))
+
+		if indent == 0 {
+			currentSection = key
+			currentSubsection = ""
+			currentProfile = ""
+			if key == "current" && value != "" {
+				cfg.Current = value
+			}
+			continue
+		}
+
+		switch currentSection {
+		case "trino":
+			// Legacy flat config — populate a "default" profile
+			if _, exists := cfg.Profiles["default"]; !exists {
+				cfg.Profiles["default"] = TrinoProfileConfig{}
+			}
+			p := cfg.Profiles["default"]
+			// Reset subsection when returning to profile-level indent
+			if currentSubsection == "ssl" && indent <= 2 {
+				currentSubsection = ""
+			}
+			if key == "ssl" && value == "" {
+				currentSubsection = "ssl"
+				cfg.Profiles["default"] = p
+				continue
+			}
+			if currentSubsection == "ssl" {
+				applySSLField(&p, key, value)
+			} else {
+				applyProfileField(&p, key, value)
+			}
+			cfg.Profiles["default"] = p
+			if cfg.Current == "" {
+				cfg.Current = "default"
+			}
+
+		case "profiles":
+			if indent == 2 && value == "" {
+				// Profile name header
+				currentProfile = key
+				cfg.Profiles[currentProfile] = TrinoProfileConfig{}
+				currentSubsection = ""
+				continue
+			}
+			if currentProfile != "" {
+				p := cfg.Profiles[currentProfile]
+				// Reset subsection when returning to profile-field indent
+				if currentSubsection == "ssl" && indent <= 4 {
+					currentSubsection = ""
+				}
+				if key == "ssl" && value == "" {
+					currentSubsection = "ssl"
+					cfg.Profiles[currentProfile] = p
+					continue
+				}
+				if currentSubsection == "ssl" {
+					applySSLField(&p, key, value)
+				} else {
+					applyProfileField(&p, key, value)
+				}
+				cfg.Profiles[currentProfile] = p
+			}
+
+		case "output":
+			if key == "format" && value != "" {
+				cfg.Output.Format = value
+			}
+		}
+	}
+
+	return cfg
+}
+
+// cleanYAMLValue strips YAML quoting and inline comments from a value
+func cleanYAMLValue(v string) string {
+	// Strip inline comments (only outside quotes)
+	if !strings.HasPrefix(v, "'") && !strings.HasPrefix(v, "\"") {
+		if idx := strings.Index(v, " #"); idx >= 0 {
+			v = strings.TrimSpace(v[:idx])
+		}
+	}
+	// Strip surrounding quotes
+	if len(v) >= 2 {
+		if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {
+			v = v[1 : len(v)-1]
+		}
+	}
+	return v
+}
+
+func applyProfileField(p *TrinoProfileConfig, key, value string) {
+	switch key {
+	case "host":
+		p.Host = value
+	case "port":
+		if n, err := fmt.Sscanf(value, "%d", &p.Port); n == 0 || err != nil {
+			p.Port = 0
+		}
+	case "user":
+		p.User = value
+	case "password":
+		p.Password = value
+	case "catalog":
+		p.Catalog = value
+	case "schema":
+		p.Schema = value
+	case "source":
+		p.Source = value
+	}
+}
+
+func applySSLField(p *TrinoProfileConfig, key, value string) {
+	switch key {
+	case "enabled":
+		b := value == "true"
+		p.SSL.Enabled = &b
+	case "insecure":
+		p.SSL.Insecure = value == "true"
+	}
+}
+
+// ParseCLIConfig parses CLI configuration from JSON data
 func ParseCLIConfig(data []byte) (*CLIConfig, error) {
-	var cfg CLIConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
-	}
-	// Auto-migrate legacy flat config to profiles for custom config files too
-	if err := cfg.migrateLegacyConfig(); err != nil {
-		return nil, fmt.Errorf("failed to migrate legacy config: %w", err)
-	}
-	// If no profiles exist after migration, ensure we have a default profile
-	if len(cfg.Profiles) == 0 {
-		cfg.Profiles = defaultCLIConfig().Profiles
-		if cfg.Current == "" {
-			cfg.Current = "default"
-		}
-	}
-	return &cfg, nil
+	return parseCLIConfigFromJSON(data)
 }
 
-// ParseCLIConfigWithPath parses CLI configuration from YAML data and sets the config path
+// ParseCLIConfigWithPath parses CLI configuration from JSON data and sets the config path
 func ParseCLIConfigWithPath(data []byte, configPath string) (*CLIConfig, error) {
-	var cfg CLIConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	cfg, err := parseCLIConfigFromJSON(data)
+	if err != nil {
+		return nil, err
 	}
-	// Set ConfigPath before migration so it saves to the correct location
 	cfg.ConfigPath = configPath
-	// Auto-migrate legacy flat config to profiles
-	if err := cfg.migrateLegacyConfig(); err != nil {
-		return nil, fmt.Errorf("failed to migrate legacy config: %w", err)
-	}
-	// If no profiles exist after migration, ensure we have a default profile
+	return cfg, nil
+}
+
+// ParseYAMLConfigWithPath parses a legacy YAML config and sets the config path
+func ParseYAMLConfigWithPath(data []byte, configPath string) (*CLIConfig, error) {
+	cfg := parseSimpleYAML(data)
+	cfg.ConfigPath = configPath
 	if len(cfg.Profiles) == 0 {
 		cfg.Profiles = defaultCLIConfig().Profiles
 		if cfg.Current == "" {
 			cfg.Current = "default"
 		}
 	}
+	return cfg, nil
+}
+
+// parseCLIConfigFromJSON parses and normalizes a JSON config
+func parseCLIConfigFromJSON(data []byte) (*CLIConfig, error) {
+	var cfg CLIConfig
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			return nil, fmt.Errorf("failed to parse config file: %w", err)
+		}
+	}
+
+	// Ensure profiles map exists with defaults
+	if len(cfg.Profiles) == 0 {
+		cfg.Profiles = defaultCLIConfig().Profiles
+		if cfg.Current == "" {
+			cfg.Current = "default"
+		}
+	}
+
 	return &cfg, nil
 }
 
 // SaveCLIConfig saves the CLI configuration to the path it was loaded from,
-// or to ~/.config/trino/config.yaml if no path was set
+// or to ~/.config/trino/config.json if no path was set
 func SaveCLIConfig(cfg *CLIConfig) error {
-	var configPath string
-	if cfg.ConfigPath != "" {
-		configPath = cfg.ConfigPath
-	} else {
-		// Use XDG config directory: ~/.config/trino/config.yaml
+	configPath := cfg.ConfigPath
+	if configPath == "" {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			return fmt.Errorf("failed to get home directory: %w", err)
 		}
-		configPath = filepath.Join(homeDir, ".config", "trino", "config.yaml")
+		configPath = filepath.Join(homeDir, ".config", "trino", "config.json")
 	}
 
 	// Create config directory if it doesn't exist
@@ -156,10 +325,11 @@ func SaveCLIConfig(cfg *CLIConfig) error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	data, err := yaml.Marshal(cfg)
+	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
+	data = append(data, '\n')
 
 	if err := os.WriteFile(configPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
@@ -186,58 +356,10 @@ func defaultCLIConfig() *CLIConfig {
 				Schema:  "default",
 			},
 		},
-		Output: struct {
-			Format string `yaml:"format"`
-		}{
+		Output: OutputConfig{
 			Format: "table",
 		},
 	}
-}
-
-// migrateLegacyConfig migrates old flat trino config to profiles structure
-func (c *CLIConfig) migrateLegacyConfig() error {
-	// Check if we have legacy flat config (has trino.host but no profiles)
-	hasLegacyConfig := c.Trino.Host != ""
-	hasProfiles := len(c.Profiles) > 0
-
-	if hasLegacyConfig && !hasProfiles {
-		// Migrate legacy config to "default" profile
-		c.Profiles = map[string]TrinoProfileConfig{
-			"default": {
-				Host:     c.Trino.Host,
-				Port:     c.Trino.Port,
-				User:     c.Trino.User,
-				Password: c.Trino.Password,
-				Catalog:  c.Trino.Catalog,
-				Schema:   c.Trino.Schema,
-				Source:   c.Trino.Source,
-				SSL:      c.Trino.SSL,
-			},
-		}
-		// Set current to default if not already set
-		if c.Current == "" {
-			c.Current = "default"
-		}
-		// Clear legacy config (not strictly necessary but clean)
-		c.Trino = struct {
-			Host     string `yaml:"host"`
-			Port     int    `yaml:"port"`
-			User     string `yaml:"user"`
-			Password string `yaml:"password"`
-			Catalog  string `yaml:"catalog"`
-			Schema   string `yaml:"schema"`
-			Source   string `yaml:"source"`
-			SSL      struct {
-				Enabled  *bool `yaml:"enabled"`
-				Insecure bool  `yaml:"insecure"`
-			} `yaml:"ssl"`
-		}{}
-		// Save the migrated config
-		if err := SaveCLIConfig(c); err != nil {
-			return fmt.Errorf("failed to save migrated config: %w", err)
-		}
-	}
-	return nil
 }
 
 // GetActiveProfile returns the active profile based on precedence:
@@ -245,10 +367,8 @@ func (c *CLIConfig) migrateLegacyConfig() error {
 // 2. Current field in config
 // 3. "default" profile fallback
 func (c *CLIConfig) GetActiveProfile(profileName string) (*TrinoProfileConfig, error) {
-	// Determine which profile to use
 	name := c.resolveProfileName(profileName)
 
-	// Validate profile exists
 	profile, exists := c.Profiles[name]
 	if !exists {
 		return nil, fmt.Errorf("profile '%s' not found in config. Available profiles: %v",
@@ -260,17 +380,12 @@ func (c *CLIConfig) GetActiveProfile(profileName string) (*TrinoProfileConfig, e
 
 // resolveProfileName determines the active profile name based on precedence
 func (c *CLIConfig) resolveProfileName(explicitName string) string {
-	// 1. Explicit profile name (from --profile flag or TRINO_PROFILE env)
 	if explicitName != "" {
 		return explicitName
 	}
-
-	// 2. Current field in config
 	if c.Current != "" {
 		return c.Current
 	}
-
-	// 3. "default" profile fallback
 	return "default"
 }
 
@@ -280,14 +395,7 @@ func (c *CLIConfig) getProfileNames() []string {
 	for name := range c.Profiles {
 		names = append(names, name)
 	}
-	// Simple sort (could use sort.Strings but avoiding import for now)
-	for i := 0; i < len(names); i++ {
-		for j := i + 1; j < len(names); j++ {
-			if names[i] > names[j] {
-				names[i], names[j] = names[j], names[i]
-			}
-		}
-	}
+	sort.Strings(names)
 	return names
 }
 
@@ -298,7 +406,6 @@ func (c *CLIConfig) GetProfileNames() []string {
 
 // Validate validates the config (e.g., current profile exists)
 func (c *CLIConfig) Validate() error {
-	// If current is set, ensure the profile exists
 	if c.Current != "" {
 		if _, exists := c.Profiles[c.Current]; !exists {
 			return fmt.Errorf("current profile '%s' does not exist. Available profiles: %v",
@@ -306,7 +413,6 @@ func (c *CLIConfig) Validate() error {
 		}
 	}
 
-	// Validate each profile has required fields
 	for name, profile := range c.Profiles {
 		if profile.Host == "" {
 			return fmt.Errorf("profile '%s' is missing required field 'host'", name)
@@ -342,7 +448,6 @@ func (c *CLIConfig) ApplyToEnv(profileName string) error {
 	}
 
 	setEnvIfValue("TRINO_HOST", profile.Host)
-	// Only set port if it's a valid non-zero value
 	if profile.Port > 0 {
 		setEnvIfValue("TRINO_PORT", fmt.Sprintf("%d", profile.Port))
 	}
@@ -353,10 +458,8 @@ func (c *CLIConfig) ApplyToEnv(profileName string) error {
 	if profile.Source != "" {
 		setEnvIfValue("TRINO_SOURCE", profile.Source)
 	}
-	// Only set SSL flags if explicitly configured in the YAML (non-nil pointer)
 	if profile.SSL.Enabled != nil {
 		setEnvIfValue("TRINO_SSL", fmt.Sprintf("%t", *profile.SSL.Enabled))
-		// When SSL is configured, also set INSECURE to match profile (overrides env var)
 		setEnvIfValue("TRINO_SSL_INSECURE", fmt.Sprintf("%t", profile.SSL.Insecure))
 	}
 	return nil
@@ -371,7 +474,6 @@ func (c *CLIConfig) GetOutputFormat() string {
 }
 
 // setEnvIfValue sets an environment variable to the given value (if non-empty)
-// This overrides any existing value, allowing profiles to take precedence over env vars
 func setEnvIfValue(key, value string) {
 	if value == "" {
 		return

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -63,9 +64,12 @@ func main() {
 	}
 
 	if explicitCLI || shouldRunCLIMode(args) {
-		// CLI mode
 		if err := RunCLIMode(); err != nil {
-			log.Fatalf("CLI error: %v", err)
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			if _, ok := err.(*usageError); ok {
+				os.Exit(exitUsage)
+			}
+			os.Exit(exitError)
 		}
 		return
 	}
@@ -82,7 +86,11 @@ func main() {
 		if isTTY() {
 			// Interactive terminal - show CLI help
 			if err := RunCLIMode(); err != nil {
-				log.Fatalf("CLI error: %v", err)
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				if _, ok := err.(*usageError); ok {
+					os.Exit(exitUsage)
+				}
+				os.Exit(exitError)
 			}
 			return
 		}

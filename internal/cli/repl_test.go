@@ -1,12 +1,18 @@
 package cli
 
 import (
+	"bytes"
+	"context"
+	"strings"
 	"testing"
+
+	"github.com/tuannvm/mcp-trino/internal/trino"
 )
 
 func TestNewREPL(t *testing.T) {
 	mockClient := &mockTrinoClient{}
-	cmd := NewCommands(mockClient, "table")
+	var buf bytes.Buffer
+	cmd := NewCommandsWithWriters(mockClient, "table", &buf, &buf)
 
 	repl := NewREPL(cmd, "memory", "default")
 
@@ -20,7 +26,8 @@ func TestNewREPL(t *testing.T) {
 
 func TestNewREPL_EmptyCatalogSchema(t *testing.T) {
 	mockClient := &mockTrinoClient{}
-	cmd := NewCommands(mockClient, "table")
+	var buf bytes.Buffer
+	cmd := NewCommandsWithWriters(mockClient, "table", &buf, &buf)
 
 	repl := NewREPL(cmd, "", "")
 
@@ -31,7 +38,8 @@ func TestNewREPL_EmptyCatalogSchema(t *testing.T) {
 
 func TestNewREPL_CatalogOnly_NoSchema(t *testing.T) {
 	mockClient := &mockTrinoClient{}
-	cmd := NewCommands(mockClient, "table")
+	var buf bytes.Buffer
+	cmd := NewCommandsWithWriters(mockClient, "table", &buf, &buf)
 
 	repl := NewREPL(cmd, "memory", "")
 
@@ -42,7 +50,8 @@ func TestNewREPL_CatalogOnly_NoSchema(t *testing.T) {
 
 func TestNewREPL_CatalogAndSchema(t *testing.T) {
 	mockClient := &mockTrinoClient{}
-	cmd := NewCommands(mockClient, "table")
+	var buf bytes.Buffer
+	cmd := NewCommandsWithWriters(mockClient, "table", &buf, &buf)
 
 	repl := NewREPL(cmd, "memory", "default")
 
@@ -117,23 +126,85 @@ func TestHasMoreInput(t *testing.T) {
 }
 
 func TestREPL_PrintHelp(t *testing.T) {
-	repl := &REPL{}
-	// Just verify it doesn't panic
+	var buf bytes.Buffer
+	repl := &REPL{out: &buf}
 	repl.printHelp()
+
+	output := buf.String()
+	if !strings.Contains(output, "Meta-commands") {
+		t.Errorf("expected help text, got: %s", output)
+	}
 }
 
 func TestREPL_PrintHistory_Empty(t *testing.T) {
-	repl := &REPL{}
+	var buf bytes.Buffer
+	repl := &REPL{out: &buf}
 	history := []string{}
 
-	// Just verify it doesn't panic
 	repl.printHistory(&history)
+
+	if !strings.Contains(buf.String(), "No history") {
+		t.Errorf("expected 'No history', got: %s", buf.String())
+	}
+}
+
+func TestREPL_RunWithInput(t *testing.T) {
+	client := &mockTrinoClient{
+		catalogs: []string{"cat1", "cat2"},
+	}
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, "table", &stdout, &stderr)
+
+	input := strings.NewReader("\\catalogs\n\\quit\n")
+	repl := NewREPLWithReader(cmd, "", "", input)
+
+	ctx := context.Background()
+	err := repl.Run(ctx)
+	if err != nil {
+		t.Fatalf("REPL.Run() failed: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "cat1") {
+		t.Errorf("expected catalogs in output, got: %s", output)
+	}
+}
+
+func TestREPL_RunQuery(t *testing.T) {
+	client := &mockTrinoClient{
+		queryResult: &trino.QueryResult{
+			Rows: []map[string]interface{}{
+				{"val": 42},
+			},
+			MaxRows: 10000,
+		},
+	}
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, "table", &stdout, &stderr)
+
+	input := strings.NewReader("SELECT 42;\n\\quit\n")
+	repl := NewREPLWithReader(cmd, "", "", input)
+
+	err := repl.Run(context.Background())
+	if err != nil {
+		t.Fatalf("REPL.Run() failed: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "42") {
+		t.Errorf("expected query result in output, got: %s", output)
+	}
 }
 
 func TestREPL_PrintHistory_WithItems(t *testing.T) {
-	repl := &REPL{}
+	var buf bytes.Buffer
+	repl := &REPL{out: &buf}
 	history := []string{"SELECT 1", "SELECT 2", "SELECT 3"}
 
-	// Just verify it doesn't panic
 	repl.printHistory(&history)
+
+	output := buf.String()
+	if !strings.Contains(output, "SELECT 1") || !strings.Contains(output, "SELECT 3") {
+		t.Errorf("expected history items in output, got: %s", output)
+	}
 }
