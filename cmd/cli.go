@@ -84,7 +84,7 @@ func runCLI(stdout, stderr io.Writer, rawArgs []string) error {
 	}
 
 	if *showVersion {
-		fmt.Fprintf(stdout, "mcp-trino %s\n", Version)
+		_, _ = fmt.Fprintf(stdout, "mcp-trino %s\n", Version)
 		return nil
 	}
 
@@ -131,7 +131,7 @@ func runCLI(stdout, stderr io.Writer, rawArgs []string) error {
 		var loadErr error
 		cliConfig, loadErr = cli.LoadCLIConfig()
 		if loadErr != nil {
-			fmt.Fprintf(stderr, "Warning: failed to load CLI config: %v\n", loadErr)
+			_, _ = fmt.Fprintf(stderr, "Warning: failed to load CLI config: %v\n", loadErr)
 			cliConfig = cli.DefaultCLIConfig()
 		}
 	}
@@ -161,7 +161,7 @@ func runCLI(stdout, stderr io.Writer, rawArgs []string) error {
 
 	// Apply profile to environment
 	if err := cliConfig.ApplyToEnv(activeProfile); err != nil {
-		fmt.Fprintf(stderr, "Warning: failed to apply CLI config: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "Warning: failed to apply CLI config: %v\n", err)
 	}
 
 	// Apply CLI flags to environment (highest precedence)
@@ -207,7 +207,7 @@ func runCLI(stdout, stderr io.Writer, rawArgs []string) error {
 	}
 	defer func() {
 		if closeErr := trinoClient.Close(); closeErr != nil {
-			fmt.Fprintf(stderr, "Error closing Trino client: %v\n", closeErr)
+			_, _ = fmt.Fprintf(stderr, "Error closing Trino client: %v\n", closeErr)
 		}
 	}()
 
@@ -336,7 +336,7 @@ func isHelpRequest(args []string) bool {
 
 // printMainHelp prints structured, LLM-friendly help to w
 func printMainHelp(w io.Writer) {
-	fmt.Fprintf(w, `NAME
+	_, _ = fmt.Fprintf(w, `NAME
     mcp-trino - Trino SQL client and MCP server
 
 SYNOPSIS
@@ -433,7 +433,7 @@ SEE ALSO
 func printSubcommandHelp(w io.Writer, command string) {
 	switch command {
 	case "query":
-		fmt.Fprintf(w, `NAME
+		_, _ = fmt.Fprintf(w, `NAME
     mcp-trino query - Execute a SQL query
 
 SYNOPSIS
@@ -453,7 +453,7 @@ EXAMPLES
     mcp-trino --format csv query 'SELECT * FROM t' > out.csv
 `)
 	case "catalogs":
-		fmt.Fprintf(w, `NAME
+		_, _ = fmt.Fprintf(w, `NAME
     mcp-trino catalogs - List all available catalogs
 
 SYNOPSIS
@@ -467,7 +467,7 @@ EXAMPLES
     mcp-trino --format json catalogs
 `)
 	case "schemas":
-		fmt.Fprintf(w, `NAME
+		_, _ = fmt.Fprintf(w, `NAME
     mcp-trino schemas - List schemas in a catalog
 
 SYNOPSIS
@@ -484,7 +484,7 @@ EXAMPLES
     mcp-trino --format json schemas
 `)
 	case "tables":
-		fmt.Fprintf(w, `NAME
+		_, _ = fmt.Fprintf(w, `NAME
     mcp-trino tables - List tables in a schema
 
 SYNOPSIS
@@ -502,7 +502,7 @@ EXAMPLES
     mcp-trino --format json tables
 `)
 	case "describe":
-		fmt.Fprintf(w, `NAME
+		_, _ = fmt.Fprintf(w, `NAME
     mcp-trino describe - Describe table columns
 
 SYNOPSIS
@@ -522,7 +522,7 @@ EXAMPLES
     mcp-trino --format json describe my_table
 `)
 	case "explain":
-		fmt.Fprintf(w, `NAME
+		_, _ = fmt.Fprintf(w, `NAME
     mcp-trino explain - Show query execution plan
 
 SYNOPSIS
@@ -537,7 +537,7 @@ EXAMPLES
     mcp-trino --format json explain 'SELECT count(*) FROM t'
 `)
 	case "config":
-		fmt.Fprintf(w, `NAME
+		_, _ = fmt.Fprintf(w, `NAME
     mcp-trino config - Manage CLI configuration
 
 SYNOPSIS
@@ -559,7 +559,7 @@ EXAMPLES
     mcp-trino config profile show staging
 `)
 	case "interactive":
-		fmt.Fprintf(w, `NAME
+		_, _ = fmt.Fprintf(w, `NAME
     mcp-trino interactive - Start interactive REPL mode
 
 SYNOPSIS
@@ -579,8 +579,8 @@ EXAMPLES
     mcp-trino --profile staging interactive
 `)
 	default:
-		fmt.Fprintf(w, "No help available for command: %s\n", command)
-		fmt.Fprintf(w, "Run 'mcp-trino --help' for a list of commands.\n")
+		_, _ = fmt.Fprintf(w, "No help available for command: %s\n", command)
+		_, _ = fmt.Fprintf(w, "Run 'mcp-trino --help' for a list of commands.\n")
 	}
 }
 
@@ -601,14 +601,14 @@ func runConfigCommand(w io.Writer, args []string, cliConfig *cli.CLIConfig) erro
 // runConfigProfileCommand handles profile management commands
 func runConfigProfileCommand(w io.Writer, args []string, cliConfig *cli.CLIConfig) error {
 	if len(args) < 3 {
-		fmt.Fprintln(w, "config profile - Manage Trino connection profiles")
-		fmt.Fprintln(w)
-		fmt.Fprintln(w, "Usage:")
-		fmt.Fprintln(w, "  mcp-trino config profile list           List all profiles")
-		fmt.Fprintln(w, "  mcp-trino config profile use <name>      Set current profile")
-		fmt.Fprintln(w, "  mcp-trino config profile show <name>     Show profile details")
-		fmt.Fprintln(w)
-		fmt.Fprintf(w, "Current profile: %s\n", cliConfig.Current)
+		_, _ = fmt.Fprintln(w, "config profile - Manage Trino connection profiles")
+		_, _ = fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w, "Usage:")
+		_, _ = fmt.Fprintln(w, "  mcp-trino config profile list           List all profiles")
+		_, _ = fmt.Fprintln(w, "  mcp-trino config profile use <name>      Set current profile")
+		_, _ = fmt.Fprintln(w, "  mcp-trino config profile show <name>     Show profile details")
+		_, _ = fmt.Fprintln(w)
+		_, _ = fmt.Fprintf(w, "Current profile: %s\n", cliConfig.Current)
 		return nil
 	}
 
@@ -631,8 +631,8 @@ func runConfigProfileCommand(w io.Writer, args []string, cliConfig *cli.CLIConfi
 }
 
 func runProfileList(w io.Writer, cliConfig *cli.CLIConfig) error {
-	fmt.Fprintf(w, "Available profiles (current: %s):\n", cliConfig.Current)
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintf(w, "Available profiles (current: %s):\n", cliConfig.Current)
+	_, _ = fmt.Fprintln(w)
 
 	for _, name := range cliConfig.GetProfileNames() {
 		profile := cliConfig.Profiles[name]
@@ -640,10 +640,10 @@ func runProfileList(w io.Writer, cliConfig *cli.CLIConfig) error {
 		if name == cliConfig.Current {
 			currentMarker = " *"
 		}
-		fmt.Fprintf(w, "  %s%s: %s@%s:%d\n", name, currentMarker, profile.User, profile.Host, profile.Port)
+		_, _ = fmt.Fprintf(w, "  %s%s: %s@%s:%d\n", name, currentMarker, profile.User, profile.Host, profile.Port)
 	}
 
-	fmt.Fprintf(w, "\nTotal: %d profile(s)\n", len(cliConfig.Profiles))
+	_, _ = fmt.Fprintf(w, "\nTotal: %d profile(s)\n", len(cliConfig.Profiles))
 	return nil
 }
 
@@ -651,7 +651,7 @@ func runProfileUse(w io.Writer, cliConfig *cli.CLIConfig, name string) error {
 	if err := cliConfig.SetCurrent(name); err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "Current profile set to: %s\n", name)
+	_, _ = fmt.Fprintf(w, "Current profile set to: %s\n", name)
 	return nil
 }
 
@@ -667,24 +667,24 @@ func runProfileShow(w io.Writer, cliConfig *cli.CLIConfig, name string) error {
 		currentMarker = " (current)"
 	}
 
-	fmt.Fprintf(w, "Profile: %s%s\n", name, currentMarker)
-	fmt.Fprintf(w, "  Host: %s\n", profile.Host)
-	fmt.Fprintf(w, "  Port: %d\n", profile.Port)
-	fmt.Fprintf(w, "  User: %s\n", profile.User)
+	_, _ = fmt.Fprintf(w, "Profile: %s%s\n", name, currentMarker)
+	_, _ = fmt.Fprintf(w, "  Host: %s\n", profile.Host)
+	_, _ = fmt.Fprintf(w, "  Port: %d\n", profile.Port)
+	_, _ = fmt.Fprintf(w, "  User: %s\n", profile.User)
 	if profile.Password != "" {
-		fmt.Fprintln(w, "  Password: ********")
+		_, _ = fmt.Fprintln(w, "  Password: ********")
 	}
 	if profile.Catalog != "" {
-		fmt.Fprintf(w, "  Catalog: %s\n", profile.Catalog)
+		_, _ = fmt.Fprintf(w, "  Catalog: %s\n", profile.Catalog)
 	}
 	if profile.Schema != "" {
-		fmt.Fprintf(w, "  Schema: %s\n", profile.Schema)
+		_, _ = fmt.Fprintf(w, "  Schema: %s\n", profile.Schema)
 	}
 	if profile.SSL.Enabled != nil {
-		fmt.Fprintf(w, "  SSL: %v\n", *profile.SSL.Enabled)
+		_, _ = fmt.Fprintf(w, "  SSL: %v\n", *profile.SSL.Enabled)
 	}
 	if profile.SSL.Insecure {
-		fmt.Fprintln(w, "  SSL Insecure: true")
+		_, _ = fmt.Fprintln(w, "  SSL Insecure: true")
 	}
 	return nil
 }
