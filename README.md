@@ -280,16 +280,19 @@ export TRINO_SCHEMA=analytics
 export TRINO_SSL=true
 ```
 
-**Secret Manager Source** (optional):
+**Secret Management** (recommended):
+
+Secrets are loaded purely from environment variables. Use a secrets CLI to inject them via Unix piping at launch time — the app never touches your vault:
 
 ```bash
-# Enable dynamic secret loading for config keys such as:
-# TRINO_USER, TRINO_PASSWORD, OIDC_CLIENT_SECRET, JWT_SECRET, etc.
-export TRINO_SECRET_SOURCE=vault://secret/data/mcp-trino
+# 1Password CLI — resolves op:// references in an env file
+op run --env-file=.env -- mcp-trino
 
-# Optional: fail startup if secret retrieval fails
-export TRINO_SECRET_REQUIRED=true
+# Or inline per-variable
+TRINO_PASSWORD=$(op read 'op://Engineering/Trino/password') mcp-trino
 ```
+
+See [docs/secrets.md](docs/secrets.md) for 1Password, Vault, and Kubernetes patterns, and for security nuances (shell-history, process-list, and env-var leakage).
 
 **REPL Meta-Commands** (in interactive mode):
 - `\help` - Show help
@@ -313,20 +316,16 @@ For client integration and tool documentation, see [Integration Guide](docs/inte
 
 **Key Variables:** `TRINO_HOST`, `TRINO_USER`, `TRINO_SCHEME`, `MCP_TRANSPORT`, `OAUTH_PROVIDER`
 
-**Secret Sources:**
+**Secret Management:** Inject secrets through the process environment — `mcp-trino` reads them directly. See [docs/secrets.md](docs/secrets.md) for 1Password, Vault, and Kubernetes recipes.
 
 ```bash
-# HashiCorp Vault KV (requires VAULT_ADDR + VAULT_TOKEN)
-export VAULT_ADDR=https://vault.company.com
-export VAULT_TOKEN=...
-export TRINO_SECRET_SOURCE=vault://secret/data/mcp-trino
+# 1Password (biometric-gated, zero disk writes)
+op run --env-file=.env -- mcp-trino
 
-# 1Password CLI (requires authenticated `op`)
-export TRINO_SECRET_SOURCE=op://Engineering/Trino
+# Vault (via vault-agent or CLI)
+TRINO_PASSWORD=$(vault kv get -field=password secret/mcp-trino) mcp-trino
 
-# Generic command adapter (must print JSON object to stdout)
-export TRINO_SECRET_SOURCE=command://local
-export TRINO_SECRET_COMMAND='printf "%s" "{\"TRINO_PASSWORD\":\"secret\"}"'
+# Kubernetes: use standard Secret → envFrom in the Helm chart values
 ```
 
 **OAuth Configuration:**
