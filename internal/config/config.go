@@ -1,15 +1,12 @@
 package config
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/tuannvm/mcp-trino/internal/secret"
 )
 
 // TrinoConfig holds Trino connection parameters
@@ -61,50 +58,7 @@ func NewTrinoConfig() (*TrinoConfig, error) {
 
 // NewTrinoConfigWithVersion creates a new TrinoConfig with a specific version for X-Trino-Source
 func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
-	// Use a timeout for secret retrieval to prevent startup hangs
-	const secretLoadTimeout = 30 * time.Second
-	ctx, cancel := context.WithTimeout(context.Background(), secretLoadTimeout)
-	defer cancel()
-
-	resolver, err := secret.NewResolverFromEnv()
-	if err != nil {
-		// Check if this is an optional secret source
-		required := strings.EqualFold(strings.TrimSpace(os.Getenv("TRINO_SECRET_REQUIRED")), "true")
-		if !required {
-			log.Printf("WARNING: Failed to initialize secret resolver (%v). Falling back to environment variables.", err)
-			resolver = nil
-		} else {
-			return nil, fmt.Errorf("failed to initialize required secret resolver: %w", err)
-		}
-	}
-	if resolver != nil {
-		defer func() {
-			if closeErr := resolver.Close(); closeErr != nil {
-				log.Printf("WARNING: Failed to close secret resolver: %v", closeErr)
-			}
-		}()
-		if err := resolver.Preload(ctx); err != nil {
-			if resolver.Required() {
-				return nil, fmt.Errorf("failed to load required secrets from %s: %w", resolver.Source(), err)
-			}
-			log.Printf("WARNING: Failed to load optional secrets from %s (%v). Falling back to environment variables.", resolver.Source(), err)
-			resolver = nil
-		} else {
-			log.Printf("INFO: Loaded secret source via %s provider", resolver.ProviderName())
-		}
-	}
-
-	resolveEnv := func(key, fallback string) string {
-		if resolver != nil {
-			value, ok, lookupErr := resolver.Lookup(ctx, key)
-			if lookupErr != nil {
-				log.Printf("WARNING: Failed to lookup %s from secret source: %v", key, lookupErr)
-			} else if ok {
-				return value
-			}
-		}
-		return getEnv(key, fallback)
-	}
+	resolveEnv := getEnv
 
 	port, _ := strconv.Atoi(resolveEnv("TRINO_PORT", "8080"))
 	ssl, _ := strconv.ParseBool(resolveEnv("TRINO_SSL", "true"))

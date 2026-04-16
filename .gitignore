@@ -33,3 +33,4 @@ vendor/
 .claude-plugin/.mcp-trino-version
 .claude/
 .claude/harness/
+trash/
