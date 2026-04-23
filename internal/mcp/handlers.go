@@ -305,7 +305,7 @@ func RegisterTrinoTools(m *server.MCPServer, h *TrinoHandlers) {
 		mcp.WithString("query", mcp.Required(), mcp.Description("SQL query to execute. By default read-only queries only; DML/DDL requires TRINO_ALLOW_WRITE_QUERIES=true")),
 	), h.ExecuteQuery)
 
-	m.AddTool(mcp.NewTool("list_catalogs",
+	m.AddTool(newNoArgTool("list_catalogs",
 		mcp.WithDescription("Discover available Trino catalogs - each catalog represents a connector to different data systems (PostgreSQL, MySQL, S3, HDFS, Kafka, etc.). Catalogs are your entry point to querying data across heterogeneous systems in a single SQL query."),
 		mcp.WithTitleAnnotation("List Catalogs"),
 		mcp.WithReadOnlyHintAnnotation(true)),
@@ -342,4 +342,13 @@ func RegisterTrinoTools(m *server.MCPServer, h *TrinoHandlers) {
 		mcp.WithString("query", mcp.Required(), mcp.Description("SQL query to analyze (SELECT, JOIN, aggregations, etc.)")),
 		mcp.WithString("format", mcp.Description("Plan type: LOGICAL, DISTRIBUTED, VALIDATE, or IO (optional)"))),
 		h.ExplainQuery)
+}
+
+// Workaround for mcp-go v0.43.1 - https://github.com/mark3labs/mcp-go/issues/694
+// TODO: Remove this workaround when bumping mcp-go dependency
+func newNoArgTool(name string, opts ...mcp.ToolOption) mcp.Tool {
+	tool := mcp.NewTool(name, opts...)
+	tool.InputSchema = mcp.ToolInputSchema{}
+	tool.RawInputSchema = json.RawMessage(`{"type":"object","properties":{}}`)
+	return tool
 }
