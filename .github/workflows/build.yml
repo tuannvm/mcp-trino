@@ -93,7 +93,7 @@ jobs:
           govulncheck ./...
 
       - name: Run dependency scan
-        uses: aquasecurity/trivy-action@v0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: "fs"
           scan-ref: "."
@@ -109,13 +109,13 @@ jobs:
           sarif_file: "trivy-results.sarif"
           
       - name: Generate SBOM
-        uses: anchore/sbom-action@v0.20.10
+        uses: anchore/sbom-action@v0.24.0
         with:
           format: spdx-json
           output-file: sbom.spdx.json
           
       - name: Upload SBOM
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: sbom
           path: sbom.spdx.json
@@ -142,7 +142,7 @@ jobs:
         run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           file: ./coverage.txt
           flags: unittests
