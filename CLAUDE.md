@@ -173,6 +173,23 @@ The GitHub Actions workflow (`.github/workflows/build.yml`) includes:
 - Test legacy SSE endpoint at `http://localhost:8080/sse` for backward compatibility
 - Test status endpoint at `GET /`
 
+## Lastro Trino Catalogs
+
+When connected to the Lastro production Trino, the MCP exposes the catalogs below. **All catalogs (sandbox + production) are accessible** — there is no platform-side allowlist. Caveats sobre PII, custo e WAF ficam no `knowledge/trino-mcp-guide.md` no repositório `code-agents`.
+
+| Catalog | Connector | Schemas | Conteúdo |
+|---|---|---|---|
+| `core_sbx` | postgresql | `public` | Postgres Core sandbox |
+| `core_prd` | postgresql | `public` | Postgres Core produção |
+| `coreai_sbx` | postgresql | `public` | Postgres Core AI sandbox |
+| `coreai_prd` | postgresql | `public` | Postgres Core AI produção |
+| `lake_landing` | iceberg | `sbx_bronze_postgres_*`, `prd_bronze_postgres_*` | Bronze (Iceberg/S3) |
+| `lake_curated` | iceberg | `sbx_silver_*`, `prd_silver_*`, `sbx_gold_*`, `prd_gold_*` | Silver e Gold |
+
+Domínios: `core`, `coreai`, `cross`, `finance`.
+
+Os deploys (Helm) e o binário usado como plugin Claude Code conectam ao Trino remoto via env vars (`TRINO_HOST`, `TRINO_USER`, `TRINO_PASSWORD`); a pasta `trino-conf/` deste repo é apenas para o Trino local de testes (`docker-compose`).
+
 ## Build and Release
 
 - **Multi-platform Support**: Uses GoReleaser for linux/darwin/windows on amd64/arm64/arm
