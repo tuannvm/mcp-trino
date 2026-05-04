@@ -335,3 +335,23 @@ func TestNewTrinoConfigMalformedAllowlist(t *testing.T) {
 		})
 	}
 }
+
+// TestNewTrinoConfigReadsCredentialsFromEnv pins the post-resolver contract:
+// TRINO_USER / TRINO_PASSWORD come straight from the process environment.
+// External secret managers (1Password, Vault, etc.) inject via the env at launch time.
+func TestNewTrinoConfigReadsCredentialsFromEnv(t *testing.T) {
+	t.Setenv("TRINO_USER", "env-user")
+	t.Setenv("TRINO_PASSWORD", "env-pass")
+	t.Setenv("OAUTH_ENABLED", "false")
+
+	cfg, err := NewTrinoConfig()
+	if err != nil {
+		t.Fatalf("NewTrinoConfig() error = %v", err)
+	}
+	if cfg.User != "env-user" {
+		t.Fatalf("User = %q, want env-user", cfg.User)
+	}
+	if cfg.Password != "env-pass" {
+		t.Fatalf("Password = %q, want env-pass", cfg.Password)
+	}
+}

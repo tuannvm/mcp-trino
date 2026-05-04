@@ -61,10 +61,12 @@ go test ./cmd                # Test mode detection and integration
    - Version management and build metadata
 
 2. **CLI Layer** (`internal/cli/`):
-   - `commands.go` - CLI subcommands (query, catalogs, schemas, tables, describe, explain)
-   - `repl.go` - Interactive REPL with meta-commands (\help, \quit, \history, etc.)
-   - `config.go` - CLI config file loading (~/.config/trino/config.yaml)
-   - Output formatting (table, json, csv) with deterministic column ordering
+   - `commands.go` - CLI subcommands with `io.Writer` injection for testability
+   - `repl.go` - Interactive REPL with injectable stdin/stdout for testing
+   - `config.go` - Dual-format config (YAML via `gopkg.in/yaml.v3` + JSON via `encoding/json`)
+   - Output formatting via `text/tabwriter` (table), `encoding/csv` (CSV), `encoding/json` (JSON)
+   - Structured LLM-friendly `--help` with NAME/SYNOPSIS/DESCRIPTION/COMMANDS/FLAGS/EXAMPLES/ENVIRONMENT
+   - Unix exit codes (0=success, 1=error, 2=usage) and signal handling (SIGINT/SIGTERM)
 
 3. **Configuration Layer** (`internal/config/config.go`):
    - Environment-based configuration with validation

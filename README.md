@@ -158,13 +158,37 @@ mcp-trino --format csv query "SELECT 1"
 mcp-trino --format table query "SELECT 1"  # default
 ```
 
+### Built-in Help
+
+Every command has structured, LLM-friendly help output:
+
+```bash
+# Main help with all commands, flags, examples, and environment variables
+mcp-trino --help
+
+# Per-subcommand help
+mcp-trino query --help
+mcp-trino describe --help
+```
+
+Help output follows Unix man-page conventions with sections: NAME, SYNOPSIS, DESCRIPTION, COMMANDS, FLAGS, EXAMPLES, ENVIRONMENT, and CONFIGURATION.
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Runtime error (connection failed, query error, etc.) |
+| 2 | Usage error (unknown command, invalid flags, missing arguments) |
+
 ### Named Profiles
 
-mcp-trino supports named connection profiles for easy switching between Trino environments:
+mcp-trino supports named connection profiles for easy switching between Trino environments.
 
-**Configuration File** (~/.config/trino/config.yaml):
+**Configuration File** — supports both YAML (`~/.config/trino/config.yaml`) and JSON (`~/.config/trino/config.json`):
 
 ```yaml
+# ~/.config/trino/config.yaml
 current: prod
 
 profiles:
@@ -194,6 +218,31 @@ profiles:
 output:
   format: table
 ```
+
+Or equivalently in JSON:
+
+```json
+{
+  "current": "prod",
+  "profiles": {
+    "prod": {
+      "host": "trino.example.com",
+      "port": 443,
+      "user": "prod_user",
+      "catalog": "hive",
+      "ssl": { "enabled": true }
+    },
+    "dev": {
+      "host": "localhost",
+      "port": 8080,
+      "user": "trino"
+    }
+  },
+  "output": { "format": "table" }
+}
+```
+
+When both files exist, `config.json` takes precedence. New configs default to JSON.
 
 **Profile Management Commands:**
 
@@ -231,6 +280,20 @@ export TRINO_SCHEMA=analytics
 export TRINO_SSL=true
 ```
 
+**Secret Management** (recommended):
+
+Secrets are loaded purely from environment variables. Use a secrets CLI to inject them via Unix piping at launch time — the app never touches your vault:
+
+```bash
+# 1Password CLI — resolves op:// references in an env file
+op run --env-file=.env -- mcp-trino
+
+# Or inline per-variable
+TRINO_PASSWORD=$(op read 'op://Engineering/Trino/password') mcp-trino
+```
+
+See [docs/secrets.md](docs/secrets.md) for 1Password, Vault, and Kubernetes patterns, and for security nuances (shell-history, process-list, and env-var leakage).
+
 **REPL Meta-Commands** (in interactive mode):
 - `\help` - Show help
 - `\quit`, `\exit`, `\q` - Exit REPL
@@ -252,6 +315,18 @@ For client integration and tool documentation, see [Integration Guide](docs/inte
 ## Configuration
 
 **Key Variables:** `TRINO_HOST`, `TRINO_USER`, `TRINO_SCHEME`, `MCP_TRANSPORT`, `OAUTH_PROVIDER`
+
+**Secret Management:** Inject secrets through the process environment — `mcp-trino` reads them directly. See [docs/secrets.md](docs/secrets.md) for 1Password, Vault, and Kubernetes recipes.
+
+```bash
+# 1Password (biometric-gated, zero disk writes)
+op run --env-file=.env -- mcp-trino
+
+# Vault (via vault-agent or CLI)
+TRINO_PASSWORD=$(vault kv get -field=password secret/mcp-trino) mcp-trino
+
+# Kubernetes: use standard Secret → envFrom in the Helm chart values
+```
 
 **OAuth Configuration:**
 

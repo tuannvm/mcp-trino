@@ -101,13 +101,17 @@ mcp-trino --version
 export TRINO_HOST=localhost TRINO_PORT=8080 TRINO_USER=trino
 mcp-trino catalogs
 
-# Or use config file
+# Or use config file (YAML or JSON)
 mkdir -p ~/.config/trino
 cat > ~/.config/trino/config.yaml << EOF
-trino:
-  host: localhost
-  port: 8080
-  user: trino
+current: default
+profiles:
+  default:
+    host: localhost
+    port: 8080
+    user: trino
+    catalog: memory
+    schema: default
 EOF
 
 mcp-trino catalogs

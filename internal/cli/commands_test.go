@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/tuannvm/mcp-trino/internal/trino"
@@ -80,6 +82,12 @@ func (m *mockTrinoClient) Close() error {
 	return nil
 }
 
+func newTestCommands(client TrinoClient, format string) (*Commands, *bytes.Buffer, *bytes.Buffer) {
+	var stdout, stderr bytes.Buffer
+	cmd := NewCommandsWithWriters(client, format, &stdout, &stderr)
+	return cmd, &stdout, &stderr
+}
+
 func TestNewCommands(t *testing.T) {
 	client := &mockTrinoClient{}
 	cmd := NewCommands(client, "table")
@@ -104,11 +112,16 @@ func TestCommands_Query(t *testing.T) {
 			MaxRows:   10000,
 		},
 	}
-	cmd := NewCommands(client, "table")
+	cmd, stdout, _ := newTestCommands(client, "table")
 
 	err := cmd.Query(ctx, "SELECT * FROM test")
 	if err != nil {
 		t.Fatalf("Query() failed: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "col1") || !strings.Contains(output, "value1") {
+		t.Errorf("expected table output with col1/value1, got: %s", output)
 	}
 }
 
@@ -117,7 +130,7 @@ func TestCommands_QueryError(t *testing.T) {
 	client := &mockTrinoClient{
 		queryError: fmt.Errorf("query failed"),
 	}
-	cmd := NewCommands(client, "table")
+	cmd, _, _ := newTestCommands(client, "table")
 
 	err := cmd.Query(ctx, "SELECT * FROM test")
 	if err == nil {
@@ -128,7 +141,7 @@ func TestCommands_QueryError(t *testing.T) {
 func TestCommands_QueryEmpty(t *testing.T) {
 	ctx := context.Background()
 	client := &mockTrinoClient{}
-	cmd := NewCommands(client, "table")
+	cmd, _, _ := newTestCommands(client, "table")
 
 	err := cmd.Query(ctx, "")
 	if err == nil {
@@ -141,11 +154,16 @@ func TestCommands_Catalogs(t *testing.T) {
 	client := &mockTrinoClient{
 		catalogs: []string{"catalog1", "catalog2", "catalog3"},
 	}
-	cmd := NewCommands(client, "table")
+	cmd, stdout, _ := newTestCommands(client, "table")
 
 	err := cmd.Catalogs(ctx)
 	if err != nil {
 		t.Fatalf("Catalogs() failed: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "catalog1") {
+		t.Errorf("expected catalog1 in output, got: %s", output)
 	}
 }
 
@@ -154,7 +172,7 @@ func TestCommands_CatalogsError(t *testing.T) {
 	client := &mockTrinoClient{
 		catalogError: fmt.Errorf("catalogs failed"),
 	}
-	cmd := NewCommands(client, "table")
+	cmd, _, _ := newTestCommands(client, "table")
 
 	err := cmd.Catalogs(ctx)
 	if err == nil {
@@ -170,11 +188,16 @@ func TestCommands_Schemas(t *testing.T) {
 			"catalog2": {"schema3"},
 		},
 	}
-	cmd := NewCommands(client, "table")
+	cmd, stdout, _ := newTestCommands(client, "table")
 
 	err := cmd.Schemas(ctx, "catalog1")
 	if err != nil {
 		t.Fatalf("Schemas() failed: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "schema1") {
+		t.Errorf("expected schema1 in output, got: %s", output)
 	}
 }
 
@@ -185,9 +208,8 @@ func TestCommands_Schemas_DefaultCatalog(t *testing.T) {
 			"memory": {"default", "information_schema"},
 		},
 	}
-	cmd := NewCommands(client, "table")
+	cmd, _, _ := newTestCommands(client, "table")
 
-	// Test with empty catalog (should use default)
 	_ = os.Setenv("TRINO_CATALOG", "memory")
 	t.Cleanup(func() { _ = os.Unsetenv("TRINO_CATALOG") })
 
@@ -205,11 +227,16 @@ func TestCommands_Tables(t *testing.T) {
 			"catalog2.schema3": {"table3"},
 		},
 	}
-	cmd := NewCommands(client, "table")
+	cmd, stdout, _ := newTestCommands(client, "table")
 
 	err := cmd.Tables(ctx, "catalog1", "schema1")
 	if err != nil {
 		t.Fatalf("Tables() failed: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "table1") {
+		t.Errorf("expected table1 in output, got: %s", output)
 	}
 }
 
@@ -220,9 +247,8 @@ func TestCommands_Tables_DefaultCatalogSchema(t *testing.T) {
 			"memory.default": {"table1"},
 		},
 	}
-	cmd := NewCommands(client, "table")
+	cmd, _, _ := newTestCommands(client, "table")
 
-	// Test with empty catalog/schema (should use defaults)
 	_ = os.Setenv("TRINO_CATALOG", "memory")
 	_ = os.Setenv("TRINO_SCHEMA", "default")
 	t.Cleanup(func() {
@@ -248,18 +274,23 @@ func TestCommands_Describe(t *testing.T) {
 			MaxRows:   10000,
 		},
 	}
-	cmd := NewCommands(client, "table")
+	cmd, stdout, _ := newTestCommands(client, "table")
 
 	err := cmd.Describe(ctx, "catalog.schema.table")
 	if err != nil {
 		t.Fatalf("Describe() failed: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "col1") || !strings.Contains(output, "varchar") {
+		t.Errorf("expected column info in output, got: %s", output)
 	}
 }
 
 func TestCommands_Describe_EmptyTable(t *testing.T) {
 	ctx := context.Background()
 	client := &mockTrinoClient{}
-	cmd := NewCommands(client, "table")
+	cmd, _, _ := newTestCommands(client, "table")
 
 	err := cmd.Describe(ctx, "")
 	if err == nil {
@@ -278,18 +309,23 @@ func TestCommands_Explain(t *testing.T) {
 			MaxRows:   10000,
 		},
 	}
-	cmd := NewCommands(client, "table")
+	cmd, stdout, _ := newTestCommands(client, "table")
 
 	err := cmd.Explain(ctx, "SELECT * FROM test", "")
 	if err != nil {
 		t.Fatalf("Explain() failed: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "Query Plan") {
+		t.Errorf("expected 'Query Plan' in output, got: %s", output)
 	}
 }
 
 func TestCommands_Explain_EmptyQuery(t *testing.T) {
 	ctx := context.Background()
 	client := &mockTrinoClient{}
-	cmd := NewCommands(client, "table")
+	cmd, _, _ := newTestCommands(client, "table")
 
 	err := cmd.Explain(ctx, "", "")
 	if err == nil {
@@ -298,9 +334,9 @@ func TestCommands_Explain_EmptyQuery(t *testing.T) {
 }
 
 func TestOutputJSON(t *testing.T) {
-	cmd := &Commands{format: "json"}
+	cmd, stdout, _ := newTestCommands(&mockTrinoClient{}, "json")
 	data := map[string]interface{}{
-		"key": "value",
+		"key":    "value",
 		"number": 123,
 	}
 
@@ -308,10 +344,15 @@ func TestOutputJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("outputJSON() failed: %v", err)
 	}
+
+	output := stdout.String()
+	if !strings.Contains(output, `"key"`) || !strings.Contains(output, `"value"`) {
+		t.Errorf("expected JSON output, got: %s", output)
+	}
 }
 
 func TestOutputTable_EmptyResults(t *testing.T) {
-	cmd := &Commands{format: "table"}
+	cmd, stdout, _ := newTestCommands(&mockTrinoClient{}, "table")
 	result := &trino.QueryResult{
 		Rows:      []map[string]interface{}{},
 		Truncated: false,
@@ -321,11 +362,15 @@ func TestOutputTable_EmptyResults(t *testing.T) {
 	err := cmd.outputTable(result)
 	if err != nil {
 		t.Fatalf("outputTable() failed: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), "No results") {
+		t.Errorf("expected 'No results', got: %s", stdout.String())
 	}
 }
 
 func TestOutputTable_WithResults(t *testing.T) {
-	cmd := &Commands{format: "table"}
+	cmd, stdout, _ := newTestCommands(&mockTrinoClient{}, "table")
 	result := &trino.QueryResult{
 		Rows: []map[string]interface{}{
 			{"col1": "value1", "col2": 123},
@@ -339,10 +384,18 @@ func TestOutputTable_WithResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("outputTable() failed: %v", err)
 	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "col1") || !strings.Contains(output, "value1") {
+		t.Errorf("expected table with col1/value1, got: %s", output)
+	}
+	if !strings.Contains(output, "2 row(s)") {
+		t.Errorf("expected row count in output, got: %s", output)
+	}
 }
 
 func TestOutputCSV_EmptyResults(t *testing.T) {
-	cmd := &Commands{format: "csv"}
+	cmd, stdout, _ := newTestCommands(&mockTrinoClient{}, "csv")
 	result := &trino.QueryResult{
 		Rows:      []map[string]interface{}{},
 		Truncated: false,
@@ -353,10 +406,14 @@ func TestOutputCSV_EmptyResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("outputCSV() failed: %v", err)
 	}
+
+	if !strings.Contains(stdout.String(), "No results") {
+		t.Errorf("expected 'No results', got: %s", stdout.String())
+	}
 }
 
 func TestOutputCSV_WithResults(t *testing.T) {
-	cmd := &Commands{format: "csv"}
+	cmd, stdout, _ := newTestCommands(&mockTrinoClient{}, "csv")
 	result := &trino.QueryResult{
 		Rows: []map[string]interface{}{
 			{"col1": "value1", "col2": 123},
@@ -370,10 +427,15 @@ func TestOutputCSV_WithResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("outputCSV() failed: %v", err)
 	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "col1") || !strings.Contains(output, "value1") {
+		t.Errorf("expected CSV with col1/value1, got: %s", output)
+	}
 }
 
 func TestFormatOutput_Table(t *testing.T) {
-	cmd := &Commands{format: "table"}
+	cmd, _, _ := newTestCommands(&mockTrinoClient{}, "table")
 	result := &trino.QueryResult{
 		Rows: []map[string]interface{}{
 			{"col1": "value1"},
@@ -389,7 +451,7 @@ func TestFormatOutput_Table(t *testing.T) {
 }
 
 func TestFormatOutput_JSON(t *testing.T) {
-	cmd := &Commands{format: "json"}
+	cmd, _, _ := newTestCommands(&mockTrinoClient{}, "json")
 	result := &trino.QueryResult{
 		Rows: []map[string]interface{}{
 			{"col1": "value1"},
@@ -405,7 +467,7 @@ func TestFormatOutput_JSON(t *testing.T) {
 }
 
 func TestFormatOutput_CSV(t *testing.T) {
-	cmd := &Commands{format: "csv"}
+	cmd, _, _ := newTestCommands(&mockTrinoClient{}, "csv")
 	result := &trino.QueryResult{
 		Rows: []map[string]interface{}{
 			{"col1": "value1", "col2": 123},
