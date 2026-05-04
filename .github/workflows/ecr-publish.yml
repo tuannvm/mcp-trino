@@ -1,0 +1,179 @@
+# ==============================================================================
+# Build & publish mcp-trino to Lastro ECR (multi-arch)
+# ==============================================================================
+#
+# Builds from source and pushes to ECR so the Kubernetes cluster (Graviton/arm64)
+# can pull the image directly. Cosign keyless signing provides supply-chain
+# provenance via Sigstore.
+#
+# Triggers:
+#   - push to main  → ECR tags: latest, sha-<commit>
+#   - version tag    → ECR tags: v1.2.3, v1.2, v1, latest
+#   - workflow_dispatch → manual trigger with optional tag override
+#
+# Prerequisites:
+#   - Repository secret AWS_ECR_ROLE_ARN: IAM role with OIDC trust for
+#     repo:lastro-co/mcp-trino:* and ecr:GetAuthorizationToken +
+#     ecr:BatchCheckLayerAvailability + ecr:PutImage + ecr:InitiateLayerUpload
+#     + ecr:UploadLayerPart + ecr:CompleteLayerUpload + ecr:BatchGetImage
+# ==============================================================================
+
+name: Publish to ECR
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths-ignore:
+      - "**.md"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".gitignore"
+  workflow_dispatch:
+    inputs:
+      tag_override:
+        description: 'Override ECR tag (e.g. v4.3.2-rc1). Leave empty for auto.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write   # AWS OIDC + cosign keyless
+
+env:
+  ECR_REGISTRY: 216127928633.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPOSITORY: mcp-trino
+  AWS_REGION: us-east-1
+  PLATFORMS: linux/amd64,linux/arm64
+
+jobs:
+  publish:
+    name: Build & Push
+    runs-on: ubuntu-latest
+
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+      tags: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      # --------------------------------------------------------------------
+      # 1. Checkout and determine tags
+      # --------------------------------------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Compute image tags
+        id: meta
+        run: |
+          set -euo pipefail
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          TAGS=""
+
+          if [[ -n "${{ inputs.tag_override }}" ]]; then
+            TAGS="${{ inputs.tag_override }}"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            MAJOR=$(echo "$VERSION" | cut -d. -f1)
+            MINOR=$(echo "$VERSION" | cut -d. -f1-2)
+            TAGS="$VERSION,$MINOR,$MAJOR,latest"
+          else
+            TAGS="latest,sha-$SHA_SHORT"
+          fi
+
+          # Build full image refs
+          FULL_TAGS=""
+          for TAG in ${TAGS//,/ }; do
+            FULL_TAGS="${FULL_TAGS:+$FULL_TAGS,}$ECR_REGISTRY/$ECR_REPOSITORY:$TAG"
+          done
+
+          echo "tags=$FULL_TAGS" >> "$GITHUB_OUTPUT"
+          echo "primary_tag=${TAGS%%,*}" >> "$GITHUB_OUTPUT"
+          echo "Tags: $FULL_TAGS"
+
+      # --------------------------------------------------------------------
+      # 2. AWS auth and ECR login
+      # --------------------------------------------------------------------
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ECR_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # --------------------------------------------------------------------
+      # 3. Set up multi-arch build
+      # --------------------------------------------------------------------
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,amd64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # --------------------------------------------------------------------
+      # 4. Build and push multi-arch image
+      # --------------------------------------------------------------------
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: ${{ env.PLATFORMS }}
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      # --------------------------------------------------------------------
+      # 5. Trivy scan (informational — post-push, does not gate)
+      # --------------------------------------------------------------------
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ steps.meta.outputs.primary_tag }}
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          format: 'table'
+
+      # --------------------------------------------------------------------
+      # 6. Sign with cosign (keyless / Sigstore)
+      # --------------------------------------------------------------------
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3.7.0
+
+      - name: Sign image
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          IMAGE_REF="$ECR_REGISTRY/$ECR_REPOSITORY@$DIGEST"
+          cosign sign --yes "$IMAGE_REF"
+          echo "Signed $IMAGE_REF (keyless)"
+
+      # --------------------------------------------------------------------
+      # 7. Job summary
+      # --------------------------------------------------------------------
+      - name: Job summary
+        if: always()
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          {
+            echo "# ECR Publish"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Tags | \`$TAGS\` |"
+            echo "| Digest | \`${DIGEST:-n/a}\` |"
+            echo "| Platforms | \`$PLATFORMS\` |"
+            echo "| Commit | \`$GITHUB_SHA\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
