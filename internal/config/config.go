@@ -32,11 +32,12 @@ type TrinoConfig struct {
 	JWTSecret     string // JWT signing secret for HMAC provider
 
 	// OIDC provider configuration
-	OIDCIssuer        string // OIDC issuer URL
-	OIDCAudience      string // OIDC audience
-	OIDCClientID      string // OIDC client ID
-	OIDCClientSecret  string // OIDC client secret
-	OAuthRedirectURIs string // OAuth redirect URIs - single URI or comma-separated list
+	OIDCIssuer        string   // OIDC issuer URL
+	OIDCAudience      string   // OIDC audience
+	OIDCClientID      string   // OIDC client ID
+	OIDCClientSecret  string   // OIDC client secret
+	OAuthRedirectURIs string   // OAuth redirect URIs - single URI or comma-separated list
+	OIDCScopes        []string // OIDC scopes (from OIDC_SCOPES); include offline_access for refresh tokens
 
 	// Allowlist configuration for filtering catalogs, schemas, and tables
 	AllowedCatalogs []string // List of allowed catalogs (empty means no filtering)
@@ -85,6 +86,15 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 		if deprecatedURI != "" {
 			log.Println("WARNING: OAUTH_REDIRECT_URI is deprecated. Use OAUTH_ALLOWED_REDIRECT_URIS instead.")
 			oauthRedirectURIs = deprecatedURI
+		}
+	}
+
+	var oidcScopes []string
+	if scopesEnv := resolveEnv("OIDC_SCOPES", ""); scopesEnv != "" {
+		for _, s := range strings.Split(scopesEnv, " ") {
+			if s != "" {
+				oidcScopes = append(oidcScopes, s)
+			}
 		}
 	}
 
@@ -222,6 +232,7 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 		OIDCClientID:        oidcClientID,
 		OIDCClientSecret:    oidcClientSecret,
 		OAuthRedirectURIs:   oauthRedirectURIs,
+		OIDCScopes:          oidcScopes,
 		AllowedCatalogs:     allowedCatalogs,
 		AllowedSchemas:      allowedSchemas,
 		AllowedTables:       allowedTables,

@@ -275,6 +275,7 @@ func trinoConfigToOAuthConfig(cfg *config.TrinoConfig) *oauth.Config {
 		Audience:     cfg.OIDCAudience,
 		ClientID:     cfg.OIDCClientID,
 		ClientSecret: cfg.OIDCClientSecret,
+		Scopes:       cfg.OIDCScopes,
 		ServerURL:    serverURL,
 		JWTSecret:    []byte(cfg.JWTSecret),
 	}

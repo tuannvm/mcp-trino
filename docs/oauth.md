@@ -153,6 +153,7 @@ sequenceDiagram
 | `OIDC_AUDIENCE` | Required | Required | Token audience |
 | `OIDC_CLIENT_ID` | ❌ Not used | ✅ Required | OAuth app client ID |
 | `OIDC_CLIENT_SECRET` | ❌ Not used | ⚠️ Public: No<br/>Confidential: Yes | OAuth app secret |
+| `OIDC_SCOPES` | Optional | Optional | Space-separated scopes; add `offline_access` for refresh tokens (Okta/Azure) |
 | `OAUTH_REDIRECT_URI` | ❌ Not used | ✅ Required | Fixed or allowlist URIs |
 
 ### Redirect URI Configuration Modes
