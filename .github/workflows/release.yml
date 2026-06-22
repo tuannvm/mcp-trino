@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -47,7 +47,7 @@ jobs:
           VERBOSE: true
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         if: steps.tag.outputs.new_tag != ''
         with:
           version: latest
@@ -59,7 +59,7 @@ jobs:
       - name: Docker meta
         id: meta
         if: steps.tag.outputs.new_tag != ''
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}
           tags: |
@@ -70,11 +70,11 @@ jobs:
 
       - name: Set up Docker Buildx
         if: steps.tag.outputs.new_tag != ''
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login to GitHub Container Registry
         if: steps.tag.outputs.new_tag != ''
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -82,7 +82,7 @@ jobs:
 
       - name: Set up QEMU
         if: steps.tag.outputs.new_tag != ''
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: 'arm64,amd64,arm'
 
@@ -92,7 +92,7 @@ jobs:
 
       - name: Build and push Docker image
         if: steps.tag.outputs.new_tag != ''
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
