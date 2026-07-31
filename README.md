@@ -1,5 +1,7 @@
 # Trino MCP Server in Go
 
+[![MCP Toplist](https://mcptoplist.com/badge/io.github.tuannvm%2Fmcp-trino.svg)](https://mcptoplist.com/server/io.github.tuannvm%2Fmcp-trino)
+
 A high-performance Model Context Protocol (MCP) server for Trino implemented in Go. This project enables AI assistants to seamlessly interact with Trino's distributed SQL query engine through standardized MCP tools.
 
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/tuannvm/mcp-trino/build.yml?branch=main&label=CI%2FCD&logo=github)](https://github.com/tuannvm/mcp-trino/actions/workflows/build.yml)
