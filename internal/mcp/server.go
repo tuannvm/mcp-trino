@@ -13,9 +13,9 @@ import (
 	"time"
 
 	mcpserver "github.com/mark3labs/mcp-go/server"
-	oauth "github.com/tuannvm/oauth-mcp-proxy"
 	"github.com/tuannvm/mcp-trino/internal/config"
 	"github.com/tuannvm/mcp-trino/internal/trino"
+	oauth "github.com/tuannvm/oauth-mcp-proxy"
 )
 
 // Server represents the MCP server with all components
@@ -93,7 +93,27 @@ func (s *Server) ServeHTTP(port string) error {
 	mux.HandleFunc("/status", s.handleStatus)
 
 	if s.config.OAuthEnabled && s.oauthServer != nil {
-		s.oauthServer.RegisterHandlers(mux)
+		if getEnv("OAUTH_METADATA_FROM_DISCOVERY", "") == "true" && s.config.OIDCIssuer != "" {
+			// The library's handlers go on their OWN mux, and the two
+			// authorization-server metadata paths are served from ours instead.
+			// Registering both on one mux is impossible: http.ServeMux PANICS on
+			// a duplicate pattern, whichever order they are added in.
+			//
+			// Everything else the library registers — /oauth/callback and
+			// friends — still reaches it through the "/" fallback below, and the
+			// more specific patterns (/mcp, /sse, /status) still win.
+			oauthMux := http.NewServeMux()
+			s.oauthServer.RegisterHandlers(oauthMux)
+
+			discovery := newOIDCDiscoveryHandler(s.config.OIDCIssuer)
+			mux.Handle("/.well-known/oauth-authorization-server", discovery)
+			mux.Handle("/.well-known/oauth-metadata", discovery)
+			mux.Handle("/", oauthMux)
+
+			log.Printf("INFO: OAuth metadata served from %s/.well-known/openid-configuration", s.config.OIDCIssuer)
+		} else {
+			s.oauthServer.RegisterHandlers(mux)
+		}
 		log.Printf("INFO: OAuth enabled - mode: %s, provider: %s", s.config.OAuthMode, s.config.OAuthProvider)
 	}
 
@@ -253,7 +273,6 @@ func (s *Server) getOAuthStatusWithWarning() string {
 	}
 	return " (OAuth disabled)"
 }
-
 
 func trinoConfigToOAuthConfig(cfg *config.TrinoConfig) *oauth.Config {
 	serverURL := getEnv("MCP_URL", "")
