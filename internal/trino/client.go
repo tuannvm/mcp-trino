@@ -43,7 +43,7 @@ var (
 	}
 
 	// Pre-compiled write operation patterns
-	writeOpPatterns     []*regexp.Regexp
+	writeOpPatterns      []*regexp.Regexp
 	writeOpsExceptCreate []*regexp.Regexp
 
 	// Pre-compiled sanitization patterns
@@ -87,14 +87,62 @@ const (
 type headerRoundTripper struct {
 	base   http.RoundTripper
 	config *config.TrinoConfig
+	// tokens is nil unless TRINO_OAUTH2_* is configured; see oauth_token.go.
+	tokens *tokenSource
 }
 
+// RoundTrip sends the request, and retries it ONCE with a freshly minted token
+// if Trino rejects the credentials.
+//
+// Without this, a token the cache believes is still valid but Trino does not —
+// a clock difference, a revoked session, an expires_in the provider did not
+// honour — fails EVERY query for the rest of the process's life, since nothing
+// else ever invalidates the cache. That is a silent outage that looks like a
+// broken deployment and is only cleared by a restart.
 func (t *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.roundTripOnce(req)
+	if err != nil || t.tokens == nil || resp.StatusCode != http.StatusUnauthorized {
+		return resp, err
+	}
+
+	// Only safe to replay when the body can be rewound. GetBody is set by
+	// net/http for the body types the Trino driver uses; when it is absent the
+	// 401 is returned as-is rather than resending a half-consumed body.
+	if req.Body != nil && req.GetBody == nil {
+		return resp, nil
+	}
+	if req.GetBody != nil {
+		body, berr := req.GetBody()
+		if berr != nil {
+			return resp, nil
+		}
+		req.Body = body
+	}
+	_ = resp.Body.Close()
+
+	log.Printf("Trino rejected the access token (401); refreshing and retrying once")
+	t.tokens.Invalidate()
+	return t.roundTripOnce(req)
+}
+
+func (t *headerRoundTripper) roundTripOnce(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
 
 	// Set X-Trino-Source header for query attribution
 	if t.config.TrinoSource != "" {
 		req.Header.Set("X-Trino-Source", t.config.TrinoSource)
+	}
+
+	// Authenticate to Trino with a bearer token when one is configured. This
+	// REPLACES the basic-auth header the driver put on the request from the
+	// DSN, which is what lets a coordinator run with
+	// http-server.authentication.type=JWT and no password file at all.
+	if t.tokens != nil {
+		token, err := t.tokens.Token(req.Context())
+		if err != nil {
+			return nil, fmt.Errorf("obtaining Trino access token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	// Set X-Trino-User header if impersonation is enabled
@@ -132,10 +180,24 @@ func NewClient(cfg *config.TrinoConfig) (*Client, error) {
 	dsnURL.RawQuery = params.Encode()
 	dsn := dsnURL.String()
 
+	// A configuration error here STOPS startup. The alternative — carrying on
+	// with tokens == nil — silently falls back to the basic credentials still
+	// present in the DSN above, which a coordinator permitting password auth
+	// would accept, so a broken OAuth2 configuration would look like a working
+	// deployment authenticating as the wrong thing.
+	tokens, err := newTokenSourceFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("invalid Trino OAuth2 configuration: %w", err)
+	}
+	if tokens != nil {
+		log.Printf("Trino authentication: OAuth2 client_credentials (%s)", tokens.tokenURL)
+	}
+
 	httpClient := &http.Client{
 		Transport: &headerRoundTripper{
 			base:   http.DefaultTransport,
 			config: cfg,
+			tokens: tokens,
 		},
 	}
 	if err := trino.RegisterCustomClient("mcp-trino", httpClient); err != nil {
