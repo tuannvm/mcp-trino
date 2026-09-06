@@ -3,6 +3,7 @@ module github.com/tuannvm/mcp-trino
 go 1.25.9
 
 require (
+	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/mark3labs/mcp-go v0.43.1
 	github.com/trinodb/trino-go-client v0.328.0
 	github.com/tuannvm/oauth-mcp-proxy v1.0.1
@@ -14,7 +15,6 @@ require (
 	github.com/buger/jsonparser v1.1.1 // indirect
 	github.com/coreos/go-oidc/v3 v3.16.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/go-uuid v1.0.3 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect

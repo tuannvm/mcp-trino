@@ -2,13 +2,11 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -166,13 +164,28 @@ func (s *Server) ServeHTTP(port string) error {
 	return nil
 }
 
-// createMCPHandler creates the shared MCP handler function
+// createMCPHandler creates the shared MCP handler function.
+//
+// OAuth enforcement happens via oauthServer.WrapHandler, which actually
+// validates the bearer token (not just its presence) and returns 401 +
+// WWW-Authenticate + resource_metadata on failure. This makes `initialize`
+// and `tools/list` fail the same way `tools/call` already did via the
+// tool-handler middleware — previously they returned HTTP 200 for an
+// expired or garbage token, so clients never detected the failure and
+// never triggered re-auth.
 func (s *Server) createMCPHandler(streamableServer *mcpserver.StreamableHTTPServer) http.HandlerFunc {
+	var protected http.Handler = streamableServer
+	if s.config.OAuthEnabled && s.oauthServer != nil {
+		protected = s.oauthServer.WrapHandler(streamableServer)
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
+		// CORS preflight must be answered before the auth gate: WrapHandler
+		// does not special-case OPTIONS and would 401 it.
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -180,37 +193,7 @@ func (s *Server) createMCPHandler(streamableServer *mcpserver.StreamableHTTPServ
 
 		log.Printf("MCP %s %s from %s", r.Method, r.URL.Path, r.RemoteAddr)
 
-		if s.config.OAuthEnabled {
-			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-				log.Printf("OAuth: No bearer token provided, returning 401 with discovery info")
-
-				mcpHost := getEnv("MCP_HOST", "localhost")
-				mcpPort := getEnv("MCP_PORT", "8080")
-				scheme := s.getScheme()
-				mcpURL := getEnv("MCP_URL", fmt.Sprintf("%s://%s:%s", scheme, mcpHost, mcpPort))
-
-				w.Header().Add("WWW-Authenticate", `Bearer realm="OAuth", error="invalid_token", error_description="Missing or invalid access token"`)
-				w.Header().Add("WWW-Authenticate", fmt.Sprintf(`resource_metadata="%s/.well-known/oauth-protected-resource"`, mcpURL))
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
-
-				errorResponse := map[string]string{
-					"error":             "invalid_token",
-					"error_description": "Missing or invalid access token",
-				}
-				if err := json.NewEncoder(w).Encode(errorResponse); err != nil {
-					log.Printf("Error encoding OAuth error response: %v", err)
-				}
-				return
-			}
-
-			contextFunc := oauth.CreateHTTPContextFunc()
-			ctx := contextFunc(r.Context(), r)
-			r = r.WithContext(ctx)
-		}
-
-		streamableServer.ServeHTTP(w, r)
+		protected.ServeHTTP(w, r)
 	}
 }
 
