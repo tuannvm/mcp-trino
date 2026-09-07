@@ -654,6 +654,12 @@ func TestGetOAuthUserAndUsername(t *testing.T) {
 
 }
 
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestBaseTransport(t *testing.T) {
 	tests := []struct {
 		name             string
@@ -667,7 +673,10 @@ func TestBaseTransport(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := baseTransport(tt.sslInsecure)
+			got, err := baseTransport(tt.sslInsecure)
+			if err != nil {
+				t.Fatalf("baseTransport(%v) error = %v", tt.sslInsecure, err)
+			}
 
 			if tt.wantDefault {
 				if got != http.DefaultTransport {
@@ -692,7 +701,9 @@ func TestBaseTransport(t *testing.T) {
 }
 
 func TestBaseTransportDoesNotMutateDefault(t *testing.T) {
-	baseTransport(true)
+	if _, err := baseTransport(true); err != nil {
+		t.Fatalf("baseTransport(true) error = %v", err)
+	}
 
 	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
@@ -700,5 +711,27 @@ func TestBaseTransportDoesNotMutateDefault(t *testing.T) {
 	}
 	if defaultTransport.TLSClientConfig != nil && defaultTransport.TLSClientConfig.InsecureSkipVerify {
 		t.Error("baseTransport(true) enabled InsecureSkipVerify on http.DefaultTransport")
+	}
+}
+
+func TestBaseTransportWithReplacedDefault(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+
+	replacement := roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, nil
+	})
+	http.DefaultTransport = replacement
+
+	got, err := baseTransport(false)
+	if err != nil {
+		t.Fatalf("baseTransport(false) error = %v, want nil", err)
+	}
+	if _, ok := got.(roundTripperFunc); !ok {
+		t.Errorf("baseTransport(false) = %T, want the replaced transport", got)
+	}
+
+	if _, err := baseTransport(true); err == nil {
+		t.Error("baseTransport(true) error = nil, want an error instead of a panic")
 	}
 }
