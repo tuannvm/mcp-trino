@@ -2,6 +2,7 @@ package trino
 
 import (
 	"context"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -651,4 +652,53 @@ func TestGetOAuthUserAndUsername(t *testing.T) {
 		})
 	}
 
+}
+
+func TestBaseTransport(t *testing.T) {
+	tests := []struct {
+		name             string
+		sslInsecure      bool
+		wantDefault      bool
+		wantSkipInsecure bool
+	}{
+		{"verification enabled", false, true, false},
+		{"verification skipped", true, false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := baseTransport(tt.sslInsecure)
+
+			if tt.wantDefault {
+				if got != http.DefaultTransport {
+					t.Fatalf("baseTransport(false) = %T, want http.DefaultTransport", got)
+				}
+				return
+			}
+
+			transport, ok := got.(*http.Transport)
+			if !ok {
+				t.Fatalf("baseTransport(true) = %T, want *http.Transport", got)
+			}
+			if transport.TLSClientConfig == nil {
+				t.Fatal("TLSClientConfig is nil")
+			}
+			if transport.TLSClientConfig.InsecureSkipVerify != tt.wantSkipInsecure {
+				t.Errorf("InsecureSkipVerify = %v, want %v",
+					transport.TLSClientConfig.InsecureSkipVerify, tt.wantSkipInsecure)
+			}
+		})
+	}
+}
+
+func TestBaseTransportDoesNotMutateDefault(t *testing.T) {
+	baseTransport(true)
+
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		t.Skip("http.DefaultTransport is not an *http.Transport")
+	}
+	if defaultTransport.TLSClientConfig != nil && defaultTransport.TLSClientConfig.InsecureSkipVerify {
+		t.Error("baseTransport(true) enabled InsecureSkipVerify on http.DefaultTransport")
+	}
 }

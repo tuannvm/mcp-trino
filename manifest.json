@@ -96,7 +96,7 @@
       "type": "string",
       "title": "Allow Insecure SSL",
       "description": "Allow insecure SSL connections",
-      "default": "true",
+      "default": "false",
       "required": false
     },
     "trino_allow_write_queries": {
