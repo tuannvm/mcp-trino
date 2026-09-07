@@ -2,6 +2,7 @@ package trino
 
 import (
 	"context"
+	"crypto/tls"
 	"database/sql"
 	"fmt"
 	"log"
@@ -83,6 +84,32 @@ const (
 	impersonatedUserKey contextKey = "impersonated_user"
 )
 
+// baseTransport returns the RoundTripper backing the driver's custom HTTP
+// client. Registering a custom client makes the driver skip its own TLS setup,
+// so TRINO_SSL_INSECURE has to be honored here or it has no effect at all.
+func baseTransport(sslInsecure bool) (http.RoundTripper, error) {
+	if !sslInsecure {
+		return http.DefaultTransport, nil
+	}
+
+	// http.DefaultTransport is a package-level variable and other code may have
+	// replaced it with a wrapper, in which case there is nothing to clone.
+	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return nil, fmt.Errorf("cannot skip TLS verification: http.DefaultTransport is %T, not *http.Transport", http.DefaultTransport)
+	}
+
+	log.Printf("WARNING: TRINO_SSL_INSECURE is enabled, TLS certificate verification is off")
+
+	transport := defaultTransport.Clone()
+	if transport.TLSClientConfig == nil {
+		transport.TLSClientConfig = &tls.Config{}
+	}
+	transport.TLSClientConfig.InsecureSkipVerify = true
+
+	return transport, nil
+}
+
 // headerRoundTripper adds X-Trino-Source and X-Trino-User headers to requests
 type headerRoundTripper struct {
 	base   http.RoundTripper
@@ -132,9 +159,14 @@ func NewClient(cfg *config.TrinoConfig) (*Client, error) {
 	dsnURL.RawQuery = params.Encode()
 	dsn := dsnURL.String()
 
+	transport, err := baseTransport(cfg.SSLInsecure)
+	if err != nil {
+		return nil, err
+	}
+
 	httpClient := &http.Client{
 		Transport: &headerRoundTripper{
-			base:   http.DefaultTransport,
+			base:   transport,
 			config: cfg,
 		},
 	}

@@ -62,7 +62,7 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 
 	port, _ := strconv.Atoi(resolveEnv("TRINO_PORT", "8080"))
 	ssl, _ := strconv.ParseBool(resolveEnv("TRINO_SSL", "true"))
-	sslInsecure, _ := strconv.ParseBool(resolveEnv("TRINO_SSL_INSECURE", "true"))
+	sslInsecure, _ := strconv.ParseBool(resolveEnv("TRINO_SSL_INSECURE", "false"))
 	scheme := resolveEnv("TRINO_SCHEME", "https")
 	allowWriteQueries, _ := strconv.ParseBool(resolveEnv("TRINO_ALLOW_WRITE_QUERIES", "false"))
 

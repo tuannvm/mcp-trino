@@ -235,7 +235,7 @@ mcp-trino
 | TRINO_SCHEMA           | Default schema                    | default   |
 | TRINO_SCHEME           | Connection scheme (http/https)    | https     |
 | TRINO_SSL              | Enable SSL                        | true      |
-| TRINO_SSL_INSECURE     | Allow insecure SSL                | true      |
+| TRINO_SSL_INSECURE     | Allow insecure SSL                | false     |
 | TRINO_ALLOW_WRITE_QUERIES | Allow non-read-only SQL queries | false     |
 | TRINO_QUERY_TIMEOUT    | Query timeout in seconds          | 30        |
 | MCP_TRANSPORT          | Transport method (stdio/http)     | stdio     |

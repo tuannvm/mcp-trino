@@ -355,3 +355,35 @@ func TestNewTrinoConfigReadsCredentialsFromEnv(t *testing.T) {
 		t.Fatalf("Password = %q, want env-pass", cfg.Password)
 	}
 }
+
+func TestSSLInsecureDefault(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{"unset", "", false},
+		{"explicit false", "false", false},
+		{"explicit true", "true", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OAUTH_ENABLED", "false")
+			// Setenv first so the original value is restored on cleanup,
+			// then unset to exercise the default path.
+			t.Setenv("TRINO_SSL_INSECURE", tt.value)
+			if tt.value == "" {
+				_ = os.Unsetenv("TRINO_SSL_INSECURE")
+			}
+
+			cfg, err := NewTrinoConfig()
+			if err != nil {
+				t.Fatalf("NewTrinoConfig() error = %v", err)
+			}
+			if cfg.SSLInsecure != tt.want {
+				t.Errorf("SSLInsecure = %v, want %v", cfg.SSLInsecure, tt.want)
+			}
+		})
+	}
+}
