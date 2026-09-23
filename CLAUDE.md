@@ -135,6 +135,7 @@ All tools return JSON-formatted responses and handle parameter validation:
 - `OAUTH_PROVIDER` (hmac/okta/google/azure, default: hmac)
 - `JWT_SECRET` - Required for HMAC provider
 - `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` - For OIDC providers
+- `OIDC_SCOPES` - Space-separated scopes advertised in discovery; proxy mode also requests them at authorization (default: `openid profile email`)
 - `OAUTH_ALLOWED_REDIRECT_URIS` - Comma-separated redirect URIs
 
 Key defaults and behaviors:

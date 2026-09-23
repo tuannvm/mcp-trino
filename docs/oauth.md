@@ -153,6 +153,7 @@ sequenceDiagram
 | `OIDC_AUDIENCE` | Required | Required | Token audience |
 | `OIDC_CLIENT_ID` | ❌ Not used | ✅ Required | OAuth app client ID |
 | `OIDC_CLIENT_SECRET` | ❌ Not used | ⚠️ Public: No<br/>Confidential: Yes | OAuth app secret |
+| `OIDC_SCOPES` | Optional: advertised in discovery `scopes_supported` | Optional: requested at authorization (default `openid profile email`) and advertised in discovery | Space-separated scopes, e.g. add `offline_access` for refresh tokens and `<client_id>/<scope>` for an access token audienced to your app (Azure; use the client ID GUID, not the `api://` URI, since the app requests a token for itself and Entra rejects refresh otherwise with AADSTS90009) |
 | `OAUTH_REDIRECT_URI` | ❌ Not used | ✅ Required | Fixed or allowlist URIs |
 
 ### Redirect URI Configuration Modes

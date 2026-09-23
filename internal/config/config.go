@@ -32,11 +32,12 @@ type TrinoConfig struct {
 	JWTSecret     string // JWT signing secret for HMAC provider
 
 	// OIDC provider configuration
-	OIDCIssuer        string // OIDC issuer URL
-	OIDCAudience      string // OIDC audience
-	OIDCClientID      string // OIDC client ID
-	OIDCClientSecret  string // OIDC client secret
-	OAuthRedirectURIs string // OAuth redirect URIs - single URI or comma-separated list
+	OIDCIssuer        string   // OIDC issuer URL
+	OIDCAudience      string   // OIDC audience
+	OIDCClientID      string   // OIDC client ID
+	OIDCClientSecret  string   // OIDC client secret
+	OIDCScopes        []string // OIDC scopes requested at authorization (empty means provider default)
+	OAuthRedirectURIs string   // OAuth redirect URIs - single URI or comma-separated list
 
 	// Allowlist configuration for filtering catalogs, schemas, and tables
 	AllowedCatalogs []string // List of allowed catalogs (empty means no filtering)
@@ -77,6 +78,7 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 	oidcAudience := resolveEnv("OIDC_AUDIENCE", "") // No default - must be explicitly configured
 	oidcClientID := resolveEnv("OIDC_CLIENT_ID", "")
 	oidcClientSecret := resolveEnv("OIDC_CLIENT_SECRET", "")
+	oidcScopes := strings.Fields(resolveEnv("OIDC_SCOPES", ""))
 
 	// Redirect URI configuration with backward compatibility
 	oauthRedirectURIs := resolveEnv("OAUTH_ALLOWED_REDIRECT_URIS", "")
@@ -221,6 +223,7 @@ func NewTrinoConfigWithVersion(version string) (*TrinoConfig, error) {
 		OIDCAudience:        oidcAudience,
 		OIDCClientID:        oidcClientID,
 		OIDCClientSecret:    oidcClientSecret,
+		OIDCScopes:          oidcScopes,
 		OAuthRedirectURIs:   oauthRedirectURIs,
 		AllowedCatalogs:     allowedCatalogs,
 		AllowedSchemas:      allowedSchemas,

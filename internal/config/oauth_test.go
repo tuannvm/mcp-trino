@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"slices"
 	"testing"
 )
 
@@ -177,5 +178,45 @@ func TestOAuthProxyModeValidation(t *testing.T) {
 
 	if config.OAuthEnabled != true {
 		t.Errorf("Expected OAuth enabled")
+	}
+}
+func TestOIDCScopesConfiguration(t *testing.T) {
+	tests := []struct {
+		name     string
+		scopes   string
+		expected []string
+	}{
+		{
+			name:     "Unset leaves provider default",
+			scopes:   "",
+			expected: nil,
+		},
+		{
+			name:     "Space-separated scopes",
+			scopes:   "openid profile email offline_access client-id/access_as_user",
+			expected: []string{"openid", "profile", "email", "offline_access", "client-id/access_as_user"},
+		},
+		{
+			name:     "Extra whitespace ignored",
+			scopes:   "  openid   offline_access ",
+			expected: []string{"openid", "offline_access"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OIDC_SCOPES", tt.scopes)
+			t.Setenv("OAUTH_ENABLED", "false")
+			t.Setenv("OAUTH_MODE", "native")
+
+			config, err := NewTrinoConfig()
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if !slices.Equal(config.OIDCScopes, tt.expected) {
+				t.Errorf("Expected OIDCScopes %q, got %q", tt.expected, config.OIDCScopes)
+			}
+		})
 	}
 }

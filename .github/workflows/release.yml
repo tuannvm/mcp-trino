@@ -18,7 +18,7 @@ permissions:
   packages: write
 
 env:
-  GO_VERSION: "1.25.9"
+  GO_VERSION: "1.26.8"
   REGISTRY: ghcr.io
 
 jobs:

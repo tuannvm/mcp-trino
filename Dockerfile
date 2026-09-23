@@ -4,7 +4,7 @@ ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
 
-FROM --platform=$BUILDPLATFORM golang:1.25.9-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26.8-alpine AS builder
 
 WORKDIR /app
 
