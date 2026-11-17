@@ -91,6 +91,7 @@ jobs:
           echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
       - name: Build and push Docker image
+        id: build
         if: steps.tag.outputs.new_tag != ''
         uses: docker/build-push-action@v6
         with:
@@ -109,3 +110,27 @@ jobs:
           sbom: true
           build-args: |
             BUILDKIT_INLINE_CACHE=1
+
+      - name: Verify image binary architectures
+        if: steps.tag.outputs.new_tag != ''
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          status=0
+          for entry in "linux/amd64|x86-64" "linux/arm64|ARM aarch64" "linux/arm/v7|32-bit LSB executable, ARM" "linux/arm/v6|32-bit LSB executable, ARM"; do
+            platform="${entry%%|*}"
+            expected="${entry#*|}"
+            cid=$(docker create --platform "$platform" "$IMAGE")
+            docker cp "$cid:/app/trino-mcp" ./trino-mcp-check
+            docker rm "$cid" >/dev/null
+            actual=$(file -b ./trino-mcp-check)
+            rm -f ./trino-mcp-check
+            if [[ "$actual" == *"$expected"* ]]; then
+              echo "OK   $platform: $actual"
+            else
+              echo "::error::$platform image contains wrong binary: $actual"
+              status=1
+            fi
+          done
+          exit $status
