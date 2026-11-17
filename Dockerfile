@@ -6,6 +6,11 @@ ARG TARGETARCH
 
 FROM --platform=$BUILDPLATFORM golang:1.25.9-alpine AS builder
 
+# Global ARGs are only visible to FROM lines; redeclare them so the build stage sees them
+ARG TARGETOS
+ARG TARGETARCH
+ARG TARGETVARIANT
+
 WORKDIR /app
 
 # Install build dependencies in a separate layer for better caching
@@ -24,7 +29,7 @@ COPY . .
 # Cross-compile the application with enhanced caching
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v} \
     go build -ldflags="-w -s" -trimpath -o trino-mcp ./cmd/
 
 # Use a small image for the final container (explicit target platform)
